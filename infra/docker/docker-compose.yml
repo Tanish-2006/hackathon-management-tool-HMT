@@ -1,0 +1,83 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: hmt-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hmt
+      POSTGRES_USER: hmt
+      POSTGRES_PASSWORD: hmt_dev_password_change_in_prod
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hmt -d hmt"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - hmt-network
+
+  neo4j:
+    image: neo4j:5.23-community
+    container_name: hmt-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/hmt_neo4j_password
+      NEO4J_dbms_security_procedures_unrestricted: gds.*,apoc.*
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+    ports:
+      - "7474:7474" # HTTP
+      - "7687:7687" # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/var/lib/neo4j/import
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - hmt-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: hmt-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass hmt_redis_password
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "hmt_redis_password", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - hmt-network
+
+volumes:
+  postgres_data:
+    name: hmt_postgres_data
+  neo4j_data:
+    name: hmt_neo4j_data
+  neo4j_logs:
+    name: hmt_neo4j_logs
+  neo4j_import:
+    name: hmt_neo4j_import
+  redis_data:
+    name: hmt_redis_data
+
+networks:
+  hmt-network:
+    name: hmt-network
+    driver: bridge

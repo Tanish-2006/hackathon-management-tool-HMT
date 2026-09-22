@@ -1,0 +1,390 @@
+// HMT Database - PostgreSQL via Prisma
+// Foundation entities only - no business logic yet
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------
+// Enums
+// ---------------------------------
+
+enum Role {
+  PARTICIPANT
+  ORGANIZER
+  MENTOR
+  ADMIN
+}
+
+enum HackathonStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum PhaseStatus {
+  UPCOMING
+  ACTIVE
+  COMPLETED
+}
+
+enum TeamRole {
+  LEADER
+  MEMBER
+}
+
+enum ProjectVisibility {
+  TEAM_PRIVATE
+  MENTOR_VISIBLE
+  PUBLIC
+}
+
+enum RepositoryAccessScope {
+  READ
+  READ_WRITE
+}
+
+enum GrantStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+// ---------------------------------
+// User & Auth
+// ---------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         Role     @default(PARTICIPANT)
+  displayName  String?  @map("display_name")
+  avatarUrl    String?  @map("avatar_url")
+  isActive     Boolean  @default(true) @map("is_active")
+  emailVerified Boolean @default(false) @map("email_verified")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  sessions               Session[]
+  auditLogs              AuditLog[]          @relation("AuditActor")
+  participantProfiles    Participant[]
+  organizerProfiles      Organizer[]
+  mentorProfiles         Mentor[]
+  teamMemberships        TeamMember[]
+  repositoryGrantsGiven  RepositoryAccessGrant[] @relation("GrantedBy")
+  repositoryGrantsReceived RepositoryAccessGrant[] @relation("GrantedTo")
+  githubConnection       GitHubConnection?
+  aiInteractions         AIInteraction[]
+
+  @@index([email])
+  @@index([role])
+  @@map("users")
+}
+
+model GitHubConnection {
+  id                     String   @id @default(cuid())
+  userId                 String   @unique @map("user_id")
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  githubUserId           String   @map("github_user_id")
+  githubLogin            String   @map("github_login")
+  githubUsername         String?  @map("github_username")
+  encryptedAccessToken   String   @map("encrypted_access_token") @db.Text // AES-256-GCM encrypted at rest
+  scope                  String?
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  @@index([githubUserId])
+  @@index([githubLogin])
+  @@map("github_connections")
+}
+
+model AIInteraction {
+  id                         String   @id @default(cuid())
+  userId                     String?  @map("user_id")
+  user                       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  teamId                     String?  @map("team_id")
+  projectId                  String?  @map("project_id")
+  question                   String   @db.Text
+  sanitizedRetrievalMetadata Json?    @map("sanitized_retrieval_metadata") // { readmeContextPreview, relevantFilesMeta, retrievalReason } — NEVER raw secrets/tokens
+  analysisScope              String?  @map("analysis_scope")
+  model                      String?
+  provider                   String?
+  resultMetadata             Json?    @map("result_metadata") // { findingsCount, hadRepositoryAccess } — NEVER tokens
+  latencyMs                  Int?     @map("latency_ms")
+  success                    Boolean  @default(true)
+  errorCode                  String?  @map("error_code")
+  createdAt                  DateTime @default(now()) @map("created_at")
+  updatedAt                  DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([projectId])
+  @@index([teamId])
+  @@index([createdAt])
+  @@map("ai_interactions")
+}
+
+model Session {
+  id            String    @id @default(cuid())
+  userId        String    @map("user_id")
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String @map("refresh_token_hash") // store hash only
+  jti           String    @unique // refresh jti for reuse detection
+  tokenVersion  Int       @default(0) @map("token_version")
+  deviceInfo    String?   @map("device_info")
+  ipAddress     String?   @map("ip_address")
+  userAgent     String?   @map("user_agent")
+  expiresAt     DateTime  @map("expires_at")
+  revokedAt     DateTime? @map("revoked_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  lastUsedAt    DateTime  @updatedAt @map("last_used_at")
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+// ---------------------------------
+// Hackathon core
+// ---------------------------------
+
+model Hackathon {
+  id          String          @id @default(cuid())
+  slug        String          @unique
+  title       String
+  description String?         @db.Text
+  status      HackathonStatus @default(DRAFT)
+  startsAt    DateTime?       @map("starts_at")
+  endsAt      DateTime?       @map("ends_at")
+  publishedAt DateTime?       @map("published_at")
+  createdById String?         @map("created_by_id")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  phases            Phase[]
+  problemStatements ProblemStatement[]
+  teams             Team[]
+  resources         Resource[]
+
+  @@index([status])
+  @@index([slug])
+  @@map("hackathons")
+}
+
+model Phase {
+  id          String      @id @default(cuid())
+  hackathonId String      @map("hackathon_id")
+  hackathon   Hackathon   @relation(fields: [hackathonId], references: [id], onDelete: Cascade)
+  name        String
+  description String?     @db.Text
+  order       Int
+  status      PhaseStatus @default(UPCOMING)
+  startsAt    DateTime    @map("starts_at")
+  endsAt      DateTime    @map("ends_at")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  @@unique([hackathonId, order])
+  @@index([hackathonId])
+  @@index([status])
+  @@map("phases")
+}
+
+model ProblemStatement {
+  id          String    @id @default(cuid())
+  hackathonId String    @map("hackathon_id")
+  hackathon   Hackathon @relation(fields: [hackathonId], references: [id], onDelete: Cascade)
+  title       String
+  description String    @db.Text
+  category    String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([hackathonId])
+  @@map("problem_statements")
+}
+
+model Resource {
+  id          String    @id @default(cuid())
+  hackathonId String    @map("hackathon_id")
+  hackathon   Hackathon @relation(fields: [hackathonId], references: [id], onDelete: Cascade)
+  title       String
+  url         String?
+  type        String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([hackathonId])
+  @@map("resources")
+}
+
+// ---------------------------------
+// People
+// ---------------------------------
+
+model Participant {
+  id        String   @id @default(cuid())
+  userId    String   @unique @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bio       String?  @db.Text
+  skills    String[] @default([])
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("participants")
+}
+
+model Organizer {
+  id        String   @id @default(cuid())
+  userId    String   @unique @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("organizers")
+}
+
+model Mentor {
+  id        String   @id @default(cuid())
+  userId    String   @unique @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expertise String[] @default([])
+  bio       String?  @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("mentors")
+}
+
+// ---------------------------------
+// Team & Project
+// ---------------------------------
+
+model Team {
+  id          String   @id @default(cuid())
+  hackathonId String   @map("hackathon_id")
+  hackathon   Hackathon @relation(fields: [hackathonId], references: [id], onDelete: Cascade)
+  name        String
+  description String?  @db.Text
+  inviteCode  String?  @unique @map("invite_code")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  members  TeamMember[]
+  projects Project[]
+  repositoryConnections RepositoryConnection[]
+
+  @@unique([hackathonId, name])
+  @@index([hackathonId])
+  @@map("teams")
+}
+
+model TeamMember {
+  id       String   @id @default(cuid())
+  teamId   String   @map("team_id")
+  team     Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId   String   @map("user_id")
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     TeamRole @default(MEMBER)
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  @@unique([teamId, userId])
+  @@index([userId])
+  @@index([teamId])
+  @@map("team_members")
+}
+
+model Project {
+  id          String            @id @default(cuid())
+  teamId      String            @map("team_id")
+  team        Team              @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  title       String
+  description String?           @db.Text
+  visibility  ProjectVisibility @default(TEAM_PRIVATE)
+  repoUrl     String?           @map("repo_url")
+  demoUrl     String?           @map("demo_url")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  @@index([teamId])
+  @@map("projects")
+}
+
+// ---------------------------------
+// Repository Access Foundation
+// ---------------------------------
+
+model RepositoryConnection {
+  id              String   @id @default(cuid())
+  teamId          String   @map("team_id")
+  team            Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  provider        String   @default("github") // extensible
+  repositoryIdentifier String @map("repository_identifier") // e.g., "org/repo" or repo URL
+  ownerUserId     String   @map("owner_user_id") // team leader who owns repo
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  grants RepositoryAccessGrant[]
+
+  @@unique([provider, repositoryIdentifier])
+  @@index([teamId])
+  @@index([ownerUserId])
+  @@map("repository_connections")
+}
+
+model RepositoryAccessGrant {
+  id             String                @id @default(cuid())
+  connectionId   String                @map("connection_id")
+  connection     RepositoryConnection  @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  grantedById    String                @map("granted_by_id")
+  grantedBy      User                  @relation("GrantedBy", fields: [grantedById], references: [id], onDelete: Restrict)
+  grantedTo      String                @map("granted_to") // e.g., "hmt-ai-teammate" or user/service identifier
+  grantedToUserId String?              @map("granted_to_user_id")
+  grantedToUser  User?                 @relation("GrantedTo", fields: [grantedToUserId], references: [id], onDelete: SetNull)
+  scope          RepositoryAccessScope @default(READ)
+  status         GrantStatus           @default(ACTIVE)
+  createdAt      DateTime              @default(now()) @map("created_at")
+  revokedAt      DateTime?             @map("revoked_at")
+  revokedById    String?               @map("revoked_by_id")
+  expiresAt      DateTime?             @map("expires_at")
+  auditInfo      Json?                 @map("audit_info")
+
+  @@index([connectionId])
+  @@index([grantedById])
+  @@index([status])
+  @@map("repository_access_grants")
+}
+
+// ---------------------------------
+// Audit log (foundation)
+// ---------------------------------
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  timestamp    DateTime @default(now())
+  actorId      String?  @map("actor_id")
+  actor        User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorRole    String?  @map("actor_role")
+  action       String
+  resourceType String   @map("resource_type")
+  resourceId   String?  @map("resource_id")
+  outcome      String
+  ip           String?
+  userAgent    String?  @map("user_agent")
+  requestId    String?  @map("request_id")
+  metadata     Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([actorId])
+  @@index([action])
+  @@index([resourceType, resourceId])
+  @@index([timestamp])
+  @@map("audit_logs")
+}

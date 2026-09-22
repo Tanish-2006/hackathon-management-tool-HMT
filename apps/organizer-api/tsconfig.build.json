@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@hmt/common": ["../../packages/common/dist"],
+      "@hmt/config": ["../../packages/config/dist"],
+      "@hmt/contracts": ["../../packages/contracts/dist"],
+      "@hmt/database": ["../../packages/database/dist"],
+      "@hmt/observability": ["../../packages/observability/dist"],
+      "@hmt/security": ["../../packages/security/dist"]
+    }
+  },
+  "exclude": ["node_modules", "dist"]
+}

@@ -1,0 +1,683 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  PARTICIPANT
+  MENTOR
+  ORGANIZER
+  ADMIN
+}
+
+enum VisibilityLevel {
+  PUBLIC_PROFILE
+  TEAM_DISCOVERABLE
+  TEAM_PRIVATE
+  ORGANIZER_ONLY
+  MENTOR_ONLY
+}
+
+enum ExperienceLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+  EXPERT
+}
+
+enum FindingSeverity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+  INFO
+}
+
+enum FindingCategory {
+  SECURITY
+  COMPILE
+  LINT
+  ARCHITECTURE
+  API_MISMATCH
+  TEST_COVERAGE
+  ENV_CONFIG
+}
+
+enum ScanStatus {
+  PENDING
+  SCANNING
+  COMPLETED
+  FAILED
+}
+
+enum ProjectStatus {
+  DRAFT
+  ACTIVE
+  SUBMITTED
+  ARCHIVED
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+enum TeamRole {
+  LEADER
+  MEMBER
+  MENTOR
+}
+
+enum GrantStatus {
+  GRANTED
+  REVOKED
+}
+
+model User {
+  id              String         @id @default(uuid())
+  email           String         @unique
+  passwordHash    String
+  fullName        String
+  role            Role           @default(PARTICIPANT)
+  isEmailVerified Boolean        @default(false)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  profile              Profile?
+  skillProfile         SkillProfile?
+  refreshTokens        RefreshToken[]
+  teamMemberships      TeamMember[]
+  auditLogs            AuditLog[]
+  emailVerifications   EmailVerificationToken[]
+  passwordResets       PasswordResetToken[]
+  sessions             DeviceSession[]
+  githubConnection     GitHubConnection?
+  aiInteractions       AIInteraction[]
+
+  @@map("users")
+}
+
+model Profile {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  bio         String?
+  githubUrl   String?
+  skills      String[] @default([])
+  experience  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("profiles")
+}
+
+model SkillProfile {
+  id                  String          @id @default(uuid())
+  userId              String          @unique
+  programmingLanguages String[]       @default([])
+  frameworks          String[]        @default([])
+  databases           String[]        @default([])
+  aiMl                String[]        @default([])
+  frontend            String[]        @default([])
+  backend             String[]        @default([])
+  devOps              String[]        @default([])
+  uiUx                String[]        @default([])
+  product             String[]        @default([])
+  communication       Int             @default(3)
+  leadership          Int             @default(3)
+  experienceLevel     ExperienceLevel @default(INTERMEDIATE)
+  interests           String[]        @default([])
+  availability        String?         // e.g. "20h/week" or JSON string
+  visibility          VisibilityLevel @default(TEAM_DISCOVERABLE)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  user                User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("skill_profiles")
+}
+
+model EmailVerificationToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  isUsed    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("email_verification_tokens")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  isUsed    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
+}
+
+model DeviceSession {
+  id         String   @id @default(uuid())
+  userId     String
+  familyId   String
+  deviceInfo String?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+  lastActive DateTime @default(now())
+  isRevoked  Boolean  @default(false)
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("device_sessions")
+}
+
+model RefreshToken {
+  id          String   @id @default(uuid())
+  userId      String
+  tokenHash   String   @unique
+  familyId    String   @default(uuid())
+  isRevoked   Boolean  @default(false)
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+model Hackathon {
+  id               String      @id @default(uuid())
+  title            String
+  description      String
+  problemStatement String
+  rules            String[]    @default([])
+  resources        Json        @default("[]")
+  judgingCriteria  Json        @default("[]")
+  phases           Json        @default("[]")
+  startDate        DateTime
+  endDate          DateTime
+  isPublished      Boolean     @default(true)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  teams            Team[]
+  announcements    Announcement[]
+
+  @@map("hackathons")
+}
+
+model Announcement {
+  id          String    @id @default(uuid())
+  hackathonId String
+  title       String
+  content     String
+  isPublished Boolean   @default(true)
+  visibility  VisibilityLevel @default(PUBLIC_PROFILE)
+  createdAt   DateTime  @default(now())
+
+  hackathon   Hackathon @relation(fields: [hackathonId], references: [id], onDelete: Cascade)
+
+  @@map("announcements")
+}
+
+model Team {
+  id              String          @id @default(uuid())
+  name            String
+  hackathonId     String
+  inviteCode      String          @unique @default(uuid())
+  visibility      VisibilityLevel @default(TEAM_DISCOVERABLE)
+  maxMembers      Int             @default(4)
+  requirements    Json            @default("[]")
+  requiredSkills  String[]        @default([])
+  isDiscoverable  Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  hackathon       Hackathon       @relation(fields: [hackathonId], references: [id], onDelete: Cascade)
+  members         TeamMember[]
+  invitations     TeamInvitation[]
+  interests       TeamInterest[]
+  project         Project?
+
+  @@map("teams")
+}
+
+model TeamMember {
+  id        String   @id @default(uuid())
+  teamId    String
+  userId    String
+  role      String   @default("MEMBER")
+  joinedAt  DateTime @default(now())
+
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@map("team_members")
+}
+
+model TeamInvitation {
+  id          String           @id @default(uuid())
+  teamId      String
+  inviterId   String
+  inviteeEmail String
+  inviteeId   String?
+  status      InvitationStatus @default(PENDING)
+  message     String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  team        Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([inviteeEmail])
+  @@map("team_invitations")
+}
+
+model TeamInterest {
+  id        String   @id @default(uuid())
+  teamId    String
+  userId    String
+  message   String?
+  createdAt DateTime @default(now())
+
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@map("team_interests")
+}
+
+model Project {
+  id            String          @id @default(uuid())
+  teamId        String          @unique
+  title         String
+  description   String
+  techStack     String[]        @default([])
+  repoUrl       String?
+  status        ProjectStatus   @default(ACTIVE)
+  visibility    VisibilityLevel @default(TEAM_PRIVATE)
+  hackathonId   String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  team          Team            @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  scans         RepositoryScan[]
+  feedbacks     MentorFeedback[]
+  elimination   EliminationRecord?
+  continuations PostHackathonContinuation[]
+  milestones    ProjectMilestone[]
+  repositoryGrants RepositoryAccessGrant[]
+  phaseProgress PhaseProgress[]
+  mistakes      Mistake[]
+  evaluations   Evaluation[]
+
+  @@map("projects")
+}
+
+model ProjectMilestone {
+  id          String   @id @default(uuid())
+  projectId   String
+  title       String
+  description String?
+  dueDate     DateTime?
+  isCompleted Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("project_milestones")
+}
+
+model RepositoryScan {
+  id           String            @id @default(uuid())
+  projectId    String
+  commitHash   String?
+  status       ScanStatus        @default(PENDING)
+  score        Float?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  project      Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  findings     ScanFinding[]
+
+  @@map("repository_scans")
+}
+
+model ScanFinding {
+  id           String          @id @default(uuid())
+  scanId       String
+  severity     FindingSeverity
+  category     FindingCategory
+  file         String?
+  line         Int?
+  title        String
+  description  String
+  suggestedFix String?
+  confidence   Float           @default(1.0)
+  createdAt    DateTime        @default(now())
+
+  scan         RepositoryScan  @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@map("scan_findings")
+}
+
+model GitHubConnection {
+  id                     String   @id @default(uuid())
+  userId                 String   @unique
+  githubUserId           String   @map("github_user_id")
+  githubLogin            String   @map("github_login")
+  githubUsername         String?  @map("github_username")
+  encryptedAccessToken   String   @map("encrypted_access_token") @db.Text // AES-256-GCM encrypted at rest, never plaintext
+  scope                  String?
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([githubUserId])
+  @@index([githubLogin])
+  @@map("github_connections")
+}
+
+model RepositoryAccessGrant {
+  id          String     @id @default(uuid())
+  projectId   String
+  teamId      String
+  grantedById String
+  status      GrantStatus @default(GRANTED)
+  grantedAt   DateTime   @default(now())
+  revokedAt   DateTime?
+  revokedById String?    @map("revoked_by_id")
+  repository  String?    // e.g. "org/repo" — safe identifier only, never token
+  scope       String     @default("READ")
+  expiresAt   DateTime?
+  auditNote   String?
+
+  project     Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([teamId])
+  @@index([grantedById])
+  @@index([status])
+  @@map("repository_access_grants")
+}
+
+model AIInteraction {
+  id                          String   @id @default(uuid())
+  userId                      String?  @map("user_id")
+  teamId                      String?  @map("team_id")
+  projectId                   String?  @map("project_id")
+  question                    String   @db.Text
+  sanitizedRetrievalMetadata  Json?    @map("sanitized_retrieval_metadata") // { readmeContextPreview, relevantFilesMeta, retrievalReason } — NEVER raw secrets
+  analysisScope               String?  @map("analysis_scope") // TARGETED
+  model                       String?  // provider model name
+  provider                    String?  // mock | external
+  resultMetadata              Json?    @map("result_metadata") // { findingsCount, recommendationsCount, hadRepositoryAccess } — NEVER tokens
+  latencyMs                   Int?     @map("latency_ms")
+  success                     Boolean  @default(true)
+  errorCode                   String?  @map("error_code")
+  createdAt                   DateTime @default(now()) @map("created_at")
+  updatedAt                   DateTime @updatedAt @map("updated_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([projectId])
+  @@index([teamId])
+  @@index([createdAt])
+  @@map("ai_interactions")
+}
+
+model MentorFeedback {
+  id          String   @id @default(uuid())
+  projectId   String
+  author      String
+  authorId    String?
+  role        Role     @default(MENTOR)
+  phase       String
+  feedback    String
+  rating      Float?
+  version     Int      @default(1)
+  isPublished Boolean  @default(false)
+  publishedAt DateTime?
+  isImmutable Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("mentor_feedbacks")
+}
+
+model EliminationRecord {
+  id               String   @id @default(uuid())
+  projectId        String   @unique
+  reason           String
+  category         String
+  detailedFeedback String?
+  eliminatedAt     DateTime @default(now())
+
+  project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("elimination_records")
+}
+
+model PhaseProgress {
+  id          String   @id @default(uuid())
+  projectId   String
+  phaseName   String
+  status      String   // ACTIVE, COMPLETED, PENDING etc
+  score       Float?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("phase_progress")
+}
+
+model Mistake {
+  id          String   @id @default(uuid())
+  projectId   String
+  title       String
+  description String
+  category    String
+  severity    String
+  isPublished Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("mistakes")
+}
+
+model ImprovementArea {
+  id          String   @id @default(uuid())
+  projectId   String
+  area        String
+  suggestion  String
+  priority    String   @default("MEDIUM")
+  isPublished Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@map("improvement_areas")
+}
+
+model Evaluation {
+  id          String   @id @default(uuid())
+  projectId   String
+  evaluator   String
+  role        Role     @default(MENTOR)
+  score       Float
+  criteria    Json     @default("{}")
+  comments    String?
+  isPublished Boolean  @default(false)
+  publishedAt DateTime?
+  version     Int      @default(1)
+  createdAt   DateTime @default(now())
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("evaluations")
+}
+
+model ParticipantInsight {
+  id          String   @id @default(uuid())
+  projectId   String
+  participantId String
+  insight     String
+  lessonsLearned String?
+  isPublished Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@map("participant_insights")
+}
+
+model PostHackathonContinuation {
+  id            String   @id @default(uuid())
+  projectId     String
+  marketSummary String
+  roadmap       Json
+  targetUsers   String[] @default([])
+  nextSteps     String[] @default([])
+  createdAt     DateTime @default(now())
+
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("post_hackathon_continuations")
+}
+
+model ProjectContinuation {
+  id          String   @id @default(uuid())
+  projectId   String   @unique
+  status      String   @default("PLANNING")
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("project_continuations")
+}
+
+model ProjectOpportunity {
+  id          String   @id @default(uuid())
+  projectId   String
+  title       String
+  description String
+  type        String   // FUNDING, ACCELERATOR, etc
+  url         String?
+  createdAt   DateTime @default(now())
+
+  @@map("project_opportunities")
+}
+
+model RecommendedResource {
+  id          String   @id @default(uuid())
+  projectId   String?
+  title       String
+  url         String
+  category    String
+  createdAt   DateTime @default(now())
+
+  @@map("recommended_resources")
+}
+
+model RoadmapItem {
+  id          String   @id @default(uuid())
+  projectId   String
+  phase       String
+  title       String
+  description String?
+  dueDate     DateTime?
+  status      String   @default("PLANNED")
+  createdAt   DateTime @default(now())
+
+  @@map("roadmap_items")
+}
+
+model AIConversation {
+  id          String   @id @default(uuid())
+  projectId   String?
+  userId      String
+  title       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("ai_conversations")
+}
+
+model AIMessage {
+  id             String   @id @default(uuid())
+  conversationId String
+  role           String   // USER, ASSISTANT, SYSTEM
+  content        String
+  createdAt      DateTime @default(now())
+
+  @@map("ai_messages")
+}
+
+model AIAnalysisJob {
+  id          String     @id @default(uuid())
+  projectId   String
+  status      ScanStatus @default(PENDING)
+  type        String     @default("REPOSITORY_ANALYSIS")
+  result      Json?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@map("ai_analysis_jobs")
+}
+
+model AIFinding {
+  id          String          @id @default(uuid())
+  jobId       String
+  severity    FindingSeverity
+  category    FindingCategory
+  title       String
+  description String
+  createdAt   DateTime        @default(now())
+
+  @@map("ai_findings")
+}
+
+model AIRecommendation {
+  id          String   @id @default(uuid())
+  jobId       String?
+  projectId   String?
+  title       String
+  action      String
+  impact      String
+  category    String
+  createdAt   DateTime @default(now())
+
+  @@map("ai_recommendations")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String
+  resource  String
+  details   Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
