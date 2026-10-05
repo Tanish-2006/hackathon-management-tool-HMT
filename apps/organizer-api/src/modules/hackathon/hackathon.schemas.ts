@@ -87,6 +87,15 @@ export const manualCreateSchema = z.object({
   expectedOutcomes: z.array(z.string()).optional(),
   judgingPreferences: z.array(z.string()).optional(),
   rules: z.array(z.string()).optional(),
+  registrationStart: z.string().datetime().nullable().optional(),
+  registrationEnd: z.string().datetime().nullable().optional(),
+  eventStart: z.string().datetime().nullable().optional(),
+  eventEnd: z.string().datetime().nullable().optional(),
+  eligibility: z.array(z.string().max(120)).max(12).optional(),
+  teamSize: z.object({ min: z.number().int().min(1).max(20), max: z.number().int().min(1).max(20) }).nullable().optional(),
+  category: z.string().max(120).nullable().optional(),
+  tags: z.array(z.string().max(80)).max(20).optional(),
+  organizerName: z.string().max(160).nullable().optional(),
 });
 
 export const updateSchema = z.object({
@@ -117,4 +126,31 @@ export const updateSchema = z.object({
   openInnovation: z.object({ guidelines: z.array(z.string().max(1000)).max(10) }).nullable().optional(),
   problemStatements: z.array(z.string().max(1000)).max(10).optional(),
   theme: z.string().max(160).nullable().optional(),
+  registrationStart: z.string().datetime().nullable().optional(),
+  registrationEnd: z.string().datetime().nullable().optional(),
+  eventStart: z.string().datetime().nullable().optional(),
+  eventEnd: z.string().datetime().nullable().optional(),
+  category: z.string().max(120).nullable().optional(),
+  tags: z.array(z.string().max(80)).max(20).optional(),
+  organizerName: z.string().max(160).nullable().optional(),
+  // Step 8 Participation & Submission config (stored in metadata.draft.participation;
+  // cross-field rules enforced server-side in HackathonService.update).
+  participation: z
+    .object({
+      mode: z.enum(['INDIVIDUAL', 'TEAMS', 'BOTH']),
+      teamSize: z.object({ min: z.number().int().min(1).max(20), max: z.number().int().min(1).max(20) }).nullable().optional(),
+      eligibility: z.array(z.enum(['Students', 'Developers', 'Designers', 'Professionals', 'Anyone'])).max(12).optional(),
+      approval: z.enum(['AUTOMATIC', 'ORGANIZER_APPROVAL']).optional(),
+      participantLimit: z.number().int().min(1).nullable().optional(),
+      submission: z
+        .object({
+          required: z.array(z.enum(['TITLE', 'DESCRIPTION', 'REPO', 'DEMO_URL', 'VIDEO', 'PRESENTATION', 'DOCS'])).optional(),
+          teamSubmission: z.boolean().optional(),
+          lateAllowed: z.boolean().optional(),
+          maxSubmissions: z.number().int().min(1).nullable().optional(),
+        })
+        .optional(),
+    })
+    .nullable()
+    .optional(),
 });

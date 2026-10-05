@@ -41,6 +41,24 @@ export class SyncService {
     return Array.from(memoryStore.publishedEvents.values()).sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
   }
 
+  // Outbox for participant consumer polling (same hackathonId/slug end-to-end).
+  async listOutbox(limit = 100): Promise<Array<{ eventId: string; type: string; hackathonId: string; occurredAt: string; payload: unknown }>> {
+    return memoryStore.outbox.slice(-Math.max(1, Math.min(500, limit))).reverse();
+  }
+
+  async replayToOutbox(hackathonId: string): Promise<HackathonPublishedEvent> {
+    const event = await this.getPublishedEvent(hackathonId);
+    if (!event) throw Object.assign(new Error('Published event not found'), { statusCode: 404 });
+    memoryStore.outbox.push({
+      eventId: event.eventId,
+      type: event.type,
+      hackathonId,
+      occurredAt: new Date().toISOString(),
+      payload: event.payload,
+    });
+    return event;
+  }
+
   async consumeAsParticipant(hackathonId: string, _participantId: string): Promise<{ consumed: boolean; contract: any; warning?: string }> {
     const context = await this.getParticipantContext(hackathonId);
     if (!context) throw Object.assign(new Error('No published context'), { statusCode: 404 });

@@ -14,6 +14,8 @@ export interface AuthUser {
   fullName?: string;
   displayName?: string;
   role: HmtRole;
+  phoneNumber?: string | null;
+  isPhoneVerified?: boolean;
   raw: any;
   source: 'participant' | 'organizer';
 }
@@ -48,6 +50,8 @@ function toAuthUser(me: any, source: 'participant' | 'organizer'): AuthUser | nu
     fullName: me.fullName ?? me.user?.fullName,
     displayName: me.displayName ?? me.user?.displayName,
     role,
+    phoneNumber: me.phoneNumber ?? me.user?.phoneNumber ?? null,
+    isPhoneVerified: me.isPhoneVerified ?? me.user?.isPhoneVerified ?? false,
     raw: me,
     source,
   };

@@ -31,9 +31,9 @@ describe('Participant Backend Comprehensive Security & Privacy Suite', () => {
     privacy = module.get<PrivacyService>(PrivacyService);
     await prisma.onModuleInit();
 
-    // Register two participants
-    const regA = await authService.register({ email: 'alice.participant@example.com', password: 'StrongPass123!', fullName: 'Alice Participant' });
-    const regB = await authService.register({ email: 'bob.participant@example.com', password: 'StrongPass123!', fullName: 'Bob Participant' });
+    // Register two participants (Phase 1: phone required — one verified number = one identity)
+    const regA = await authService.register({ email: 'alice.participant@example.com', password: 'StrongPass123!', fullName: 'Alice Participant', phoneNumber: '+14155550101' });
+    const regB = await authService.register({ email: 'bob.participant@example.com', password: 'StrongPass123!', fullName: 'Bob Participant', phoneNumber: '+14155550102' });
     userA = regA.user;
     userB = regB.user;
 
@@ -171,7 +171,7 @@ describe('Participant Backend Comprehensive Security & Privacy Suite', () => {
 
     it('should enforce RBAC - participant cannot impersonate organizer', async () => {
       // registration always forces PARTICIPANT role
-      const reg = await authService.register({ email: 'evil@example.com', password: 'StrongPass123!', fullName: 'Evil' } as any);
+      const reg = await authService.register({ email: 'evil@example.com', password: 'StrongPass123!', fullName: 'Evil', phoneNumber: '+14155550103' } as any);
       expect(reg.user.role).toBe('PARTICIPANT');
       // Even if someone tries to pass role in DTO, service ignores
     });
@@ -229,7 +229,7 @@ describe('Participant Backend Comprehensive Security & Privacy Suite', () => {
       const invite = await prisma.teamInvitation.create({ data: { teamId: teamA.id, inviterId: userA.id, inviteeEmail: 'bob.participant@example.com', inviteeId: userB.id, status: 'PENDING' } } as any);
       expect(invite.status).toBe('PENDING');
       // Charlie (evil user) tries to accept Bob's invitation -> should fail because email mismatch
-      const charlieReg = await authService.register({ email: 'charlie@example.com', password: 'StrongPass123!', fullName: 'Charlie' });
+      const charlieReg = await authService.register({ email: 'charlie@example.com', password: 'StrongPass123!', fullName: 'Charlie', phoneNumber: '+14155550104' });
       // Simulate accept check: teamInvitation inviteeEmail must match requester email
       const charlie = charlieReg.user;
       // Manually check logic as controller does
@@ -452,7 +452,7 @@ describe('Participant Backend Comprehensive Security & Privacy Suite', () => {
     });
   });
 
-  // ---------- Project Visibility ----------
+    // ---------- Project Visibility ----------
   describe('Project Visibility', () => {
     it('should respect team permissions for project visibility', async () => {
       const proj = await prisma.project.findUnique({ where: { id: projectA.id } } as any);
@@ -460,8 +460,11 @@ describe('Participant Backend Comprehensive Security & Privacy Suite', () => {
       // Non-member cannot see repoUrl
       const filtered = privacy.filterProjectForParticipant(proj, null, false);
       expect(filtered.repoUrl).toBeUndefined();
-      // Member can see
-      const filteredMember = privacy.filterProjectForParticipant(proj, teamA.id, true);
+      // Member without grant cannot see repoUrl (authorized sharing only)
+      const filteredNoGrant = privacy.filterProjectForParticipant(proj, teamA.id, true, false);
+      expect(filteredNoGrant.repoUrl).toBeUndefined();
+      // Member with active grant can see
+      const filteredMember = privacy.filterProjectForParticipant(proj, teamA.id, true, true);
       expect(filteredMember.repoUrl).toBeDefined();
     });
   });

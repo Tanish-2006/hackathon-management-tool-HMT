@@ -55,6 +55,7 @@ async function runDemoScript() {
       email,
       password: 'StrongPassword123!',
       fullName: 'John Doe Developer',
+      phoneNumber: '+14155550101',
     });
     console.log(` -> Register response [${regRes.status}]:`, regRes.body.user);
     const token = regRes.body.accessToken;

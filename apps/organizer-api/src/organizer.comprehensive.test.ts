@@ -19,11 +19,19 @@ function loadEnvFromFile(): void {
   }
 }
 
+// Phase 1 phone identity: register requires a unique E.164 phone per account.
+// Counter-derived numbers stay unique across the whole file (users accumulate).
+let testPhoneCounter = 0;
+function nextTestPhone(): string {
+  testPhoneCounter += 1;
+  return `+1415555${String(testPhoneCounter).padStart(4, '0')}`;
+}
+
 async function registerAndLogin(app: any, email: string, password: string, role: string, displayName?: string): Promise<{ accessToken: string; refreshToken: string; user: any }> {
   const reg = await app.inject({
     method: 'POST',
     url: '/api/v1/auth/register',
-    payload: { email, password, displayName: displayName ?? email.split('@')[0], role },
+    payload: { email, password, displayName: displayName ?? email.split('@')[0], role, phoneNumber: nextTestPhone() },
   });
   if (reg.statusCode !== 201) throw new Error(`Register failed ${reg.statusCode}: ${reg.body}`);
   const body = JSON.parse(reg.body);
@@ -74,7 +82,7 @@ describe('Organizer Backend — Terminal 3 Comprehensive', () => {
   describe('Organizer Authentication', () => {
     it('allows ORGANIZER registration and enforces JWT', async () => {
       clearStore();
-      const res = await app.inject({ method: 'POST', url: '/api/v1/auth/register', payload: { email: 'org1@test.hmt', password: 'Str0ngPass123!', displayName: 'Org One', role: 'ORGANIZER' } });
+      const res = await app.inject({ method: 'POST', url: '/api/v1/auth/register', payload: { email: 'org1@test.hmt', password: 'Str0ngPass123!', displayName: 'Org One', role: 'ORGANIZER', phoneNumber: nextTestPhone() } });
       expect(res.statusCode).toBe(201);
       const body = JSON.parse(res.body);
       expect(body.user.role).toBe('ORGANIZER');
@@ -87,11 +95,11 @@ describe('Organizer Backend — Terminal 3 Comprehensive', () => {
 
     it('supports MENTOR and ADMIN roles', async () => {
       clearStore();
-      const mentor = await app.inject({ method: 'POST', url: '/api/v1/auth/register', payload: { email: 'mentor@test.hmt', password: 'Str0ngPass123!', role: 'MENTOR', displayName: 'Mentor' } });
+      const mentor = await app.inject({ method: 'POST', url: '/api/v1/auth/register', payload: { email: 'mentor@test.hmt', password: 'Str0ngPass123!', role: 'MENTOR', displayName: 'Mentor', phoneNumber: nextTestPhone() } });
       expect(mentor.statusCode).toBe(201);
       expect(JSON.parse(mentor.body).user.role).toBe('MENTOR');
 
-      const admin = await app.inject({ method: 'POST', url: '/api/v1/auth/register', payload: { email: 'admin@test.hmt', password: 'Str0ngPass123!', role: 'ADMIN', displayName: 'Admin' } });
+      const admin = await app.inject({ method: 'POST', url: '/api/v1/auth/register', payload: { email: 'admin@test.hmt', password: 'Str0ngPass123!', role: 'ADMIN', displayName: 'Admin', phoneNumber: nextTestPhone() } });
       expect(admin.statusCode).toBe(201);
       expect(JSON.parse(admin.body).user.role).toBe('ADMIN');
     });
@@ -103,18 +111,45 @@ describe('Organizer Backend — Terminal 3 Comprehensive', () => {
 
     it('prevents privilege escalation via login with wrong password', async () => {
       clearStore();
-      await app.inject({ method: 'POST', url: '/api/v1/auth/register', payload: { email: 'org2@test.hmt', password: 'Str0ngPass123!', role: 'ORGANIZER' } });
+      await app.inject({ method: 'POST', url: '/api/v1/auth/register', payload: { email: 'org2@test.hmt', password: 'Str0ngPass123!', role: 'ORGANIZER', phoneNumber: nextTestPhone() } });
       const badLogin = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: 'org2@test.hmt', password: 'WrongPass' } });
       expect(badLogin.statusCode).toBe(401);
     });
 
     it('refresh rotates tokens', async () => {
       clearStore();
-      const reg = await app.inject({ method: 'POST', url: '/api/v1/auth/register', payload: { email: 'refresh@test.hmt', password: 'Str0ngPass123!', role: 'ORGANIZER' } });
+      const reg = await app.inject({ method: 'POST', url: '/api/v1/auth/register', payload: { email: 'refresh@test.hmt', password: 'Str0ngPass123!', role: 'ORGANIZER', phoneNumber: nextTestPhone() } });
       const { refreshToken } = JSON.parse(reg.body);
       const refreshed = await app.inject({ method: 'POST', url: '/api/v1/auth/refresh', payload: { refreshToken } });
       expect(refreshed.statusCode).toBe(200);
       expect(JSON.parse(refreshed.body).accessToken).toBeDefined();
+    });
+
+    it('enforces one verified phone = one identity (duplicate phone rejected)', async () => {
+      clearStore();
+      const phone = nextTestPhone();
+      const first = await app.inject({ method: 'POST', url: '/api/v1/auth/register', payload: { email: 'phone1@test.hmt', password: 'Str0ngPass123!', role: 'ORGANIZER', phoneNumber: phone } });
+      expect(first.statusCode).toBe(201);
+      // Same phone with a different email (and different role) must not create another identity
+      const second = await app.inject({ method: 'POST', url: '/api/v1/auth/register', payload: { email: 'phone2@test.hmt', password: 'Str0ngPass123!', role: 'MENTOR', phoneNumber: phone } });
+      expect(second.statusCode).toBe(409);
+    });
+
+    it('verifies phone via OTP and rejects invalid codes', async () => {
+      clearStore();
+      const phone = nextTestPhone();
+      const reg = await app.inject({ method: 'POST', url: '/api/v1/auth/register', payload: { email: 'otporg@test.hmt', password: 'Str0ngPass123!', role: 'ORGANIZER', phoneNumber: phone } });
+      expect(reg.statusCode).toBe(201);
+      const { accessToken, phoneOtp } = JSON.parse(reg.body);
+      expect(phoneOtp).toBeDefined();
+      // Wrong code rejected
+      const bad = await app.inject({ method: 'POST', url: '/api/v1/auth/phone/verify', headers: authHeaders(accessToken), payload: { phoneNumber: phone, otp: '000000' } });
+      expect(bad.statusCode).toBe(400);
+      // Correct code verifies
+      const good = await app.inject({ method: 'POST', url: '/api/v1/auth/phone/verify', headers: authHeaders(accessToken), payload: { phoneNumber: phone, otp: phoneOtp } });
+      expect(good.statusCode).toBe(200);
+      const me = await app.inject({ method: 'GET', url: '/api/v1/auth/me', headers: authHeaders(accessToken) });
+      expect(JSON.parse(me.body).isPhoneVerified).toBe(true);
     });
   });
 
@@ -245,6 +280,72 @@ describe('Organizer Backend — Terminal 3 Comprehensive', () => {
       // ARCHIVED terminal - no further transitions
       res = await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/review`, headers: authHeaders(org.accessToken) });
       expect(res.statusCode).toBe(400);
+    });
+
+    it('rejects archive from non-published states (archive is terminal admin action)', async () => {
+      clearStore();
+      const org = await registerAndLogin(app, 'archguard@test.hmt', 'Str0ngPass123!', 'ORGANIZER');
+      const create = await app.inject({
+        method: 'POST',
+        url: '/api/v1/hackathons',
+        payload: { title: 'Archive Guard Hack', description: 'Desc', hackathonType: 'OPEN_INNOVATION', objective: 'Obj' },
+        headers: authHeaders(org.accessToken),
+      });
+      const hackId = JSON.parse(create.body).data.id;
+      // DRAFT -> ARCHIVED is rejected (archive only from PUBLISHED)
+      const direct = await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/archive`, headers: authHeaders(org.accessToken) });
+      expect(direct.statusCode).toBe(400);
+      // DRAFT -> REVIEW works, REVIEW -> ARCHIVED is rejected
+      await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/review`, headers: authHeaders(org.accessToken) });
+      const blocked = await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/archive`, headers: authHeaders(org.accessToken) });
+      expect(blocked.statusCode).toBe(400);
+    });
+
+    it('blocks confirm when evaluation weights do not total 100%', async () => {
+      clearStore();
+      const org = await registerAndLogin(app, 'weights@test.hmt', 'Str0ngPass123!', 'ORGANIZER');
+      const create = await app.inject({
+        method: 'POST',
+        url: '/api/v1/hackathons',
+        payload: { title: 'Weights Hack', description: 'Desc', hackathonType: 'OPEN_INNOVATION', objective: 'Obj' },
+        headers: authHeaders(org.accessToken),
+      });
+      const hackId = JSON.parse(create.body).data.id;
+      await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/phases`, payload: { name: 'registration', order: 1, startsAt: '2026-11-01T00:00:00.000Z', endsAt: '2026-11-07T00:00:00.000Z' }, headers: authHeaders(org.accessToken) });
+      // 25 + 25 + 25 = 75 -> blocked
+      for (const [name, weight] of [['Innovation', 0.25], ['Technical', 0.25], ['Impact', 0.25]] as Array<[string, number]>) {
+        await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/evaluation-criteria`, payload: { name, weight, maxScore: 10 }, headers: authHeaders(org.accessToken) });
+      }
+      await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/review`, headers: authHeaders(org.accessToken) });
+      const blocked = await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/confirm`, headers: authHeaders(org.accessToken) });
+      expect(blocked.statusCode).toBe(400);
+      expect(JSON.parse(blocked.body).error.message).toMatch(/100%/);
+      // Top up to 100% -> allowed
+      await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/evaluation-criteria`, payload: { name: 'Extra', weight: 0.25, maxScore: 10 }, headers: authHeaders(org.accessToken) });
+      const ok = await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/confirm`, headers: authHeaders(org.accessToken) });
+      expect(ok.statusCode).toBe(200);
+    });
+
+    it('validates participation config server-side on update', async () => {
+      clearStore();
+      const org = await registerAndLogin(app, 'partconf@test.hmt', 'Str0ngPass123!', 'ORGANIZER');
+      const create = await app.inject({
+        method: 'POST',
+        url: '/api/v1/hackathons',
+        payload: { title: 'Part Hack', description: 'Desc', hackathonType: 'OPEN_INNOVATION', objective: 'Obj' },
+        headers: authHeaders(org.accessToken),
+      });
+      const hackId = JSON.parse(create.body).data.id;
+      // Invalid range rejected
+      const bad = await app.inject({ method: 'PATCH', url: `/api/v1/hackathons/${hackId}`, payload: { participation: { mode: 'TEAMS', teamSize: { min: 5, max: 2 } } }, headers: authHeaders(org.accessToken) });
+      expect(bad.statusCode).toBe(400);
+      // Team size with individual-only rejected
+      const solo = await app.inject({ method: 'PATCH', url: `/api/v1/hackathons/${hackId}`, payload: { participation: { mode: 'INDIVIDUAL', teamSize: { min: 1, max: 4 } } }, headers: authHeaders(org.accessToken) });
+      expect(solo.statusCode).toBe(400);
+      // Valid config accepted and stored
+      const good = await app.inject({ method: 'PATCH', url: `/api/v1/hackathons/${hackId}`, payload: { participation: { mode: 'BOTH', teamSize: { min: 2, max: 4 }, eligibility: ['Students'], approval: 'AUTOMATIC', participantLimit: null, submission: { required: ['TITLE', 'REPO'], teamSubmission: true, lateAllowed: false, maxSubmissions: null } } }, headers: authHeaders(org.accessToken) });
+      expect(good.statusCode).toBe(200);
+      expect(JSON.parse(good.body).data.metadata.draft.participation.mode).toBe('BOTH');
     });
 
     it('validation before confirm/publish: problem statement required for PROBLEM_STATEMENT_BASED', async () => {
@@ -1078,6 +1179,73 @@ describe('Organizer Backend — Terminal 3 Comprehensive', () => {
       const hackId = JSON.parse(gen.body).data.hackathon.id;
       const attempt = await app.inject({ method: 'GET', url: `/api/v1/hackathons/${hackId}/analytics`, headers: authHeaders(participant.accessToken) });
       expect(attempt.statusCode).toBe(403);
+    });
+  });
+
+  describe('Organizer overview', () => {
+    it('returns owned command-center aggregation with real counts', async () => {
+      clearStore();
+      const org = await registerAndLogin(app, 'ovorg@test.hmt', 'Str0ngPass123!', 'ORGANIZER');
+      const input = {
+        hackathonName: 'Overview Hack',
+        objective: 'Test overview',
+        audience: 'All',
+        duration: '3 days',
+        mode: 'ONLINE',
+        themePreference: 'AI',
+        problemStatementBasedOrOpenInnovation: 'OPEN_INNOVATION',
+        expectedOutcomes: 'Demo',
+        judgingPreferences: 'Innovation',
+        resources: 'Docs',
+        rules: 'Rule 1',
+      };
+      const gen = await app.inject({ method: 'POST', url: '/api/v1/hackathons/draft/generate', payload: input, headers: authHeaders(org.accessToken) });
+      const hackId = JSON.parse(gen.body).data.hackathon.id;
+      await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/seed-demo`, headers: authHeaders(org.accessToken) });
+      const res = await app.inject({ method: 'GET', url: '/api/v1/organizer/overview', headers: authHeaders(org.accessToken) });
+      expect(res.statusCode).toBe(200);
+      const data = JSON.parse(res.body).data;
+      expect(data.summary.totalHackathons).toBe(1);
+      expect(data.summary.totalParticipants).toBeGreaterThan(0);
+      expect(data.summary.totalTeams).toBeGreaterThan(0);
+      expect(data.activeHackathon).toBeDefined();
+      expect(data.registration.total).toBeGreaterThan(0);
+      expect(data.teams.total).toBeGreaterThan(0);
+      expect(data).toHaveProperty('submissions');
+      expect(data).toHaveProperty('attention');
+      expect(data).toHaveProperty('deadlines');
+      expect(data).toHaveProperty('recentActivity');
+      expect(data).toHaveProperty('trend');
+      expect(data.hackathons.length).toBe(1);
+      // No invented capacity: schema has no participant-capacity field
+      expect(data.registration.capacity).toBeNull();
+    });
+
+    it('scopes overview to the authenticated organizer and forbids participants', async () => {
+      clearStore();
+      const orgA = await registerAndLogin(app, 'ovowner@test.hmt', 'Str0ngPass123!', 'ORGANIZER');
+      const orgB = await registerAndLogin(app, 'ovother@test.hmt', 'Str0ngPass123!', 'ORGANIZER');
+      const participant = await registerAndLogin(app, 'ovpart@test.hmt', 'Str0ngPass123!', 'PARTICIPANT');
+      const input = {
+        hackathonName: 'Owner Hack',
+        objective: 'Test scoping',
+        audience: 'All',
+        duration: '2 days',
+        mode: 'ONLINE',
+        themePreference: 'AI',
+        problemStatementBasedOrOpenInnovation: 'OPEN_INNOVATION',
+        expectedOutcomes: 'Demo',
+        judgingPreferences: 'Innovation',
+        resources: 'Docs',
+        rules: 'Rule 1',
+      };
+      await app.inject({ method: 'POST', url: '/api/v1/hackathons/draft/generate', payload: input, headers: authHeaders(orgA.accessToken) });
+      const mine = await app.inject({ method: 'GET', url: '/api/v1/organizer/overview', headers: authHeaders(orgA.accessToken) });
+      expect(JSON.parse(mine.body).data.summary.totalHackathons).toBe(1);
+      const other = await app.inject({ method: 'GET', url: '/api/v1/organizer/overview', headers: authHeaders(orgB.accessToken) });
+      expect(JSON.parse(other.body).data.summary.totalHackathons).toBe(0);
+      const denied = await app.inject({ method: 'GET', url: '/api/v1/organizer/overview', headers: authHeaders(participant.accessToken) });
+      expect(denied.statusCode).toBe(403);
     });
   });
 

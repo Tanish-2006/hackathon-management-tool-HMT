@@ -25,6 +25,10 @@ function friendlyOrganizerMessage(status: number, raw?: string, code?: string): 
   if (code === 'TOKEN_REUSE_DETECTED' || raw?.includes('TOKEN_REUSE') || raw?.includes('Token reuse')) {
     return 'Security alert: token reuse detected. All sessions revoked. Please sign in again.';
   }
+  // Never expose raw JWT internals (e.g. "jwt expired") — show a clean session message.
+  if (status === 401 && raw && /jwt|token expired|expired token|invalid token|unauthorized/i.test(raw) && !raw.includes('Invalid credentials')) {
+    return 'Session expired. Please sign in again.';
+  }
   if (raw && raw.length < 180 && !raw.includes('stack') && !raw.includes('at ')) return raw;
   switch (status) {
     case 400: return raw || 'Invalid request. Please check your input.';
@@ -47,7 +51,33 @@ function isTokenReuse(message?: string, code?: string) {
   return code === 'TOKEN_REUSE_DETECTED' || !!message?.includes('TOKEN_REUSE') || !!message?.includes('Token reuse');
 }
 
-export async function fetchOrganizer(endpoint: string, options: RequestInit = {}) {
+// Single in-flight refresh shared by concurrent 401s: parallel refreshes with the
+// same token would trip server-side reuse detection and nuke the session.
+let pendingRefresh: Promise<boolean> | null = null;
+
+async function refreshOrganizerSession(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  if (!pendingRefresh) {
+    pendingRefresh = (async () => {
+      try {
+        const refreshToken = localStorage.getItem(ORGANIZER_REFRESH_KEY);
+        if (!refreshToken) return false;
+        const res: any = await fetchOrganizer('/auth/refresh', { method: 'POST', body: JSON.stringify({ refreshToken }) }, { retried: true });
+        if (res?.accessToken) localStorage.setItem(ORGANIZER_ACCESS_KEY, res.accessToken);
+        if (res?.token) localStorage.setItem(ORGANIZER_ACCESS_KEY, res.token);
+        if (res?.refreshToken) localStorage.setItem(ORGANIZER_REFRESH_KEY, res.refreshToken);
+        return true;
+      } catch {
+        return false;
+      } finally {
+        pendingRefresh = null;
+      }
+    })();
+  }
+  return pendingRefresh;
+}
+
+export async function fetchOrganizer(endpoint: string, options: RequestInit = {}, retry?: { retried: boolean }) {
   const token = typeof window !== 'undefined' ? localStorage.getItem(ORGANIZER_ACCESS_KEY) : null;
   const hasBody = options.body !== undefined && options.body !== null;
   const requestId = getRequestId();
@@ -83,6 +113,17 @@ export async function fetchOrganizer(endpoint: string, options: RequestInit = {}
       }
       throw new OrganizerApiError(friendlyOrganizerMessage(response.status, msgRaw, 'TOKEN_REUSE_DETECTED'), response.status, 'TOKEN_REUSE_DETECTED', { ...body, requestId: responseRequestId || requestId });
     }
+    // Expired access token: refresh once and retry the original request.
+    // 401s are raised by the auth guard before any mutation, so a single retry
+    // cannot duplicate anything. Auth endpoints and reuse cases never retry.
+    if (response.status === 401 && !retry?.retried && !endpoint.startsWith('/auth/') && !isTokenReuse(msgRaw, code)) {
+      const refreshed = await refreshOrganizerSession();
+      if (refreshed) return fetchOrganizer(endpoint, options, { retried: true });
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(ORGANIZER_ACCESS_KEY);
+        localStorage.removeItem(ORGANIZER_REFRESH_KEY);
+      }
+    }
     const msg = friendlyOrganizerMessage(response.status, msgRaw, code);
     throw new OrganizerApiError(msg, response.status, code, { ...body, requestId: responseRequestId || requestId });
   }
@@ -103,7 +144,7 @@ export type OrganizerAuthResponse = { user?: OrganizerMe; accessToken: string; r
 
 export const organizerApi = {
   // ---------- Auth (organizer backend — real) ----------
-  async register(data: { email: string; password: string; displayName?: string; fullName?: string; role?: string }): Promise<OrganizerAuthResponse> {
+  async register(data: { email: string; password: string; displayName?: string; fullName?: string; role?: string; phoneNumber: string }): Promise<OrganizerAuthResponse> {
     // Creation default only (organizer API creates ORGANIZER-role accounts).
     // This is NOT an authenticated-session fallback — session role always comes from /auth/me.
     const requestedRole = data.role || 'ORGANIZER';
@@ -113,6 +154,8 @@ export const organizerApi = {
       displayName: data.displayName || data.fullName,
       fullName: data.fullName || data.displayName,
       role: requestedRole,
+      // Phase 1 phone identity: ONE verified phone number = ONE HMT identity.
+      phoneNumber: data.phoneNumber,
     };
     const res: any = await fetchOrganizer('/auth/register', { method: 'POST', body: JSON.stringify(payload) });
     const token = res.accessToken || res.token;
@@ -150,6 +193,13 @@ export const organizerApi = {
   },
   async verifyEmail(token: string): Promise<any> {
     return fetchOrganizer('/auth/verify-email', { method: 'POST', body: JSON.stringify({ token }) });
+  },
+  // Phase 1 phone identity: OTP resend + verify (JWT required, same contract as participant API).
+  async requestPhoneOtp(phoneNumber: string): Promise<{ message: string; expiresIn?: string; phoneOtp?: string }> {
+    return fetchOrganizer('/auth/phone/request-otp', { method: 'POST', body: JSON.stringify({ phoneNumber }) });
+  },
+  async verifyPhoneOtp(phoneNumber: string, otp: string): Promise<{ message: string }> {
+    return fetchOrganizer('/auth/phone/verify', { method: 'POST', body: JSON.stringify({ phoneNumber, otp }) });
   },
   async forgotPassword(email: string): Promise<any> {
     return fetchOrganizer('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) });
@@ -267,6 +317,9 @@ export const organizerApi = {
 
   // ---------- Analytics ----------
   async getAnalytics(hackathonId: string): Promise<any> { const res = await fetchOrganizer(`/hackathons/${hackathonId}/analytics`); return unwrapData<any>(res); },
+
+  // ---------- Organizer Home command center (single-call overview) ----------
+  async getOverview(): Promise<any> { const res = await fetchOrganizer('/organizer/overview'); return unwrapData<any>(res); },
 
   // ---------- Audit ----------
   async listAuditLogs(params?: { actorId?: string; action?: string; resourceType?: string; limit?: number }): Promise<any[]> {

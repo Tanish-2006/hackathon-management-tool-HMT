@@ -5,6 +5,7 @@ import { DefaultAIAdapter } from './default-ai.adapter';
 import { RepositoryModule } from '../repository/repository.module';
 import { AIInteractionPersistenceService } from './ai-interaction-persistence.service';
 import { AuditService } from '../audit/audit.service';
+import { AiAccessService } from './ai-access.service';
 
 @Module({
   imports: [RepositoryModule],
@@ -17,7 +18,8 @@ import { AuditService } from '../audit/audit.service';
     },
     AIInteractionPersistenceService,
     AuditService,
+    AiAccessService,
   ],
-  exports: [AIProvider, AIInteractionPersistenceService],
+  exports: [AIProvider, AIInteractionPersistenceService, AiAccessService],
 })
 export class AIModule {}

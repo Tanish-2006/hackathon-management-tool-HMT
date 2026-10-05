@@ -21,6 +21,7 @@ export default function ParticipantAI(){
   const [relevant,setRelevant]=useState<any[]>([]);
   const [scope,setScope]=useState<string>('TARGETED');
   const [grant,setGrant]=useState<any>(null);
+  const [aiAccess,setAiAccess]=useState<any>(null);
   const [showAnalysis,setShowAnalysis]=useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -48,6 +49,7 @@ export default function ParticipantAI(){
           }
         }
         if(t.status==='fulfilled'){ const tm=(t.value as any)?.team ?? t.value; if(tm?.id) setTeam(tm); else if((t.value as any)?.id) setTeam(t.value); }
+        try{ const acc = await hmtBackendService.getAiAccessStatus((p.status==='fulfilled'?((p.value as any)?.project ?? p.value)?.id:undefined) ?? undefined); if(m) setAiAccess(acc); }catch{ /* locked */ }
         if(convs.status==='fulfilled'){
           const c:any = convs.value;
           const arr = Array.isArray(c)?c: c?.conversations || c?.data || []
@@ -143,7 +145,16 @@ export default function ParticipantAI(){
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex gap-2"><AlertCircle size={16}/>{error}<button onClick={()=>setError(null)} className="ml-auto"><X size={14}/></button></div>}
       {success && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 flex gap-2"><CheckCircle2 size={16}/>{success}<button onClick={()=>setSuccess(null)} className="ml-auto"><X size={14}/></button></div>}
 
-      {!hasGrant && (
+      {aiAccess && !aiAccess.allowed && (
+        <div className="rounded-2xl border border-[#171a2d] bg-[#171a2d] p-4 flex gap-3 text-[#fdfbf5]">
+          <Lock size={18} className="text-[#d8e35b] mt-0.5"/>
+          <div className="text-sm">
+            <b>AI Teammate LOCKED — {aiAccess.derivedStatus ?? aiAccess.code}</b>
+            <p className="mt-1 leading-5 text-[#b9bdca]">{aiAccess.message} Backend enforces the live window; frontend hiding alone is never enough.</p>
+          </div>
+        </div>
+      )}
+      {!hasGrant && (!aiAccess || aiAccess.allowed) && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 flex gap-3">
           <ShieldAlert size={18} className="text-amber-600 mt-0.5"/>
           <div className="text-sm">

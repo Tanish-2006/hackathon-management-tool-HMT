@@ -17,6 +17,8 @@ import {
   ForgotPasswordDto,
   ResetPasswordDto,
   VerifyEmailDto,
+  RequestPhoneOtpDto,
+  VerifyPhoneDto,
 } from './dto/auth.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { AuthRateLimitGuard } from '../common/guards/rate-limit.guard';
@@ -84,6 +86,24 @@ export class AuthController {
   @ApiOperation({ summary: 'Verify email with token' })
   async verifyEmail(@Body() dto: VerifyEmailDto) {
     return this.authService.verifyEmail(dto.token);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post('phone/request-otp')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Resend phone verification OTP (Phase 1 phone identity)' })
+  async requestPhoneOtp(@Req() req: any, @Body() dto: RequestPhoneOtpDto) {
+    return this.authService.requestPhoneOtp(req.user.id, dto.phoneNumber);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post('phone/verify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify phone number with OTP (Phase 1 phone identity)' })
+  async verifyPhone(@Req() req: any, @Body() dto: VerifyPhoneDto) {
+    return this.authService.verifyPhone(req.user.id, dto.phoneNumber, dto.otp);
   }
 
   @Post('forgot-password')

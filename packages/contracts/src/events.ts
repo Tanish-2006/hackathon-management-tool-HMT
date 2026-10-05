@@ -35,10 +35,92 @@ export const hackathonPublishedSchema = baseEventSchema.extend({
         name: z.string().min(1),
         startsAt: isoDateSchema,
         endsAt: isoDateSchema,
+        order: z.number().int().optional(),
+        status: z.string().optional(),
       }),
     ),
+    // Rich canonical fields (optional for v1 backward-compat; required for new publishers).
+    // Organizer rich event maps 1:1 here; participant consumer upserts the same hackathonId/slug.
+    description: z.string().optional(),
+    hackathonType: z
+      .enum(['PROBLEM_STATEMENT_BASED', 'OPEN_INNOVATION', 'HYBRID'])
+      .optional(),
+    mode: z.enum(['ONLINE', 'OFFLINE', 'HYBRID']).optional(),
+    objective: z.string().optional(),
+    audience: z.string().optional(),
+    problemStatement: z.string().nullable().optional(),
+    rules: z.array(z.string()).optional(),
+    constraints: z.array(z.string()).optional(),
+    expectedOutcomes: z.array(z.string()).optional(),
+    theme: z.string().nullable().optional(),
+    themeIds: z.array(z.string()).optional(),
+    resources: z
+      .array(
+        z.object({
+          id: z.string().min(1),
+          title: z.string().min(1),
+          type: z.string().optional(),
+          url: z.string().nullable().optional(),
+          visibility: z.string().optional(),
+        }),
+      )
+      .optional(),
+    judgingCriteria: z
+      .array(
+        z.object({
+          id: z.string().min(1),
+          name: z.string().min(1),
+          weight: z.number().optional(),
+          maxScore: z.number().optional(),
+        }),
+      )
+      .optional(),
+    announcements: z.array(z.string()).optional(),
+    // Discovery windows (Unstop/Hack2Skill pattern: explicit registration + event dates).
+    registrationStart: isoDateSchema.nullable().optional(),
+    registrationEnd: isoDateSchema.nullable().optional(),
+    eventStart: isoDateSchema.nullable().optional(),
+    eventEnd: isoDateSchema.nullable().optional(),
+    eligibility: z.array(z.string()).optional(),
+    teamSize: z
+      .object({
+        min: z.number().int().min(1).optional(),
+        max: z.number().int().min(1).optional(),
+      })
+      .optional(),
+    category: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    organizerName: z.string().optional(),
+    hackathonVersion: z.number().int().optional(),
   }),
 });
+
+// Participant discovery query (Discover → Hackathons list; backend-filtered, never frontend-only).
+export const hackathonDiscoveryQuerySchema = z.object({
+  search: z.string().max(160).optional(),
+  status: z.string().optional(),
+  mode: z.enum(['ONLINE', 'OFFLINE', 'HYBRID']).optional(),
+  category: z.string().optional(),
+  eligibility: z.string().optional(),
+  registration: z.enum(['open', 'closed', 'all']).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+});
+
+export type HackathonDiscoveryQuery = z.infer<
+  typeof hackathonDiscoveryQuerySchema
+>;
+
+// Registration (Discover → Details → Register → skill-profile check → confirm).
+export const hackathonRegistrationSchema = z.object({
+  hackathonId: z.string().min(1),
+  teamChoice: z.enum(['create', 'join', 'later']).default('later'),
+  teamId: z.string().min(1).optional(),
+});
+
+export type HackathonRegistrationInput = z.infer<
+  typeof hackathonRegistrationSchema
+>;
 
 export const hackathonUpdatedSchema = baseEventSchema.extend({
   type: z.literal('HackathonUpdated'),

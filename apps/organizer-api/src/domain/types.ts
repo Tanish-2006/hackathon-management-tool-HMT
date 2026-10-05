@@ -66,6 +66,17 @@ export interface Hackathon {
   updatedAt: string;
   publishedAt?: string | null;
   archivedAt?: string | null;
+  // Canonical discovery windows (Unstop/Hack2Skill pattern).
+  // Optional for backward-compat; derived from phases when absent.
+  registrationStart?: string | null;
+  registrationEnd?: string | null;
+  eventStart?: string | null;
+  eventEnd?: string | null;
+  eligibility?: string[];
+  teamSize?: { min: number; max: number; recommended?: number } | null;
+  category?: string | null;
+  tags?: string[];
+  organizerName?: string | null;
   metadata?: Record<string, unknown> | null;
 }
 
@@ -286,6 +297,15 @@ export interface HackathonPublishedEvent {
     announcements: string[];
     publishedAt: string;
     hackathonVersion: number;
+    registrationStart?: string | null;
+    registrationEnd?: string | null;
+    eventStart?: string | null;
+    eventEnd?: string | null;
+    eligibility?: string[];
+    teamSize?: { min: number; max: number; recommended?: number } | null;
+    category?: string | null;
+    tags?: string[];
+    organizerName?: string | null;
   };
 }
 
@@ -320,5 +340,72 @@ export interface OrganizerAnalytics {
   submissionStatus: { totalTeams: number; submitted: number; notSubmitted: number; submissionRate: number };
   evaluationStatus: { totalFeedbacks: number; published: number; pendingReview: number; unpublished: number };
   feedbackCompletion: { totalAssignments: number; completed: number; completionRate: number };
+  generatedAt: string;
+}
+
+// Organizer Home command center — single-call aggregation over owned hackathons.
+// All counts come from stored records; nullable fields mean "not knowable from
+// existing data" (e.g. no capacity field exists) and must render as empty, never faked.
+export interface OrganizerOverview {
+  summary: {
+    totalHackathons: number;
+    activeHackathons: number;
+    totalParticipants: number;
+    totalTeams: number;
+    projectsSubmitted: number;
+    pendingEvaluations: number;
+  };
+  activeHackathon: null | {
+    id: string;
+    title: string;
+    description: string;
+    status: string;
+    currentPhase: string | null;
+    phases: Array<{ name: string; status: string }>;
+    participantCount: number;
+    teamCount: number;
+    projectCount: number;
+    mentorCount: number;
+    registrationDeadline: string | null;
+    teamFormationDeadline: string | null;
+    submissionDeadline: string | null;
+    evaluationDeadline: string | null;
+  };
+  registration: null | {
+    total: number;
+    today: number;
+    thisWeek: number;
+    capacity: null;
+    remainingCapacity: null;
+    deadline: string | null;
+    progress: null;
+  };
+  teams: null | {
+    total: number;
+    complete: number | null;
+    incomplete: number | null;
+    participantsWithoutTeam: number;
+    teamsWithoutSubmission: number;
+  };
+  submissions: null | {
+    submitted: number;
+    notSubmitted: number;
+    deadline: string | null;
+    rate: number;
+  };
+  evaluation: { total: number; published: number; pendingReview: number };
+  feedback: { completed: number; totalAssignments: number; rate: number };
+  attention: Array<{ kind: string; message: string; count: number; href: string }>;
+  deadlines: Array<{ label: string; date: string; daysRemaining: number; href: string }>;
+  recentActivity: Array<{ kind: string; message: string; at: string; href: string }>;
+  trend: Array<{ day: string; teams: number; subs: number }>;
+  hackathons: Array<{
+    id: string;
+    title: string;
+    description: string;
+    status: string;
+    hackathonType: string;
+    themeCount: number;
+  }>;
   generatedAt: string;
 }

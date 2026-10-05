@@ -125,10 +125,18 @@ export class ProjectController {
       !isMember
     )
       throw new ForbiddenException('Mentor only');
+    let hasGrant = false;
+    if (isMember) {
+      const grant: any = await (this.prisma as any).repositoryAccessGrant
+        ?.findFirst?.({ where: { projectId: id, status: 'GRANTED', revokedAt: null } })
+        .catch(() => null);
+      hasGrant = !!grant && !grant.revokedAt;
+    }
     const filtered = this.privacy.filterProjectForParticipant(
       proj,
       membership?.teamId || null,
       isMember,
+      hasGrant,
     );
     // also filter milestones if private?
     return filtered;

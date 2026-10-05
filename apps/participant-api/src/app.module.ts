@@ -15,6 +15,7 @@ import { ProjectModule } from './project/project.module';
 import { RepositoryAccessModule } from './repository-access/repository-access.module';
 import { PrivacyModule } from './privacy/privacy.module';
 import { GitHubModule } from './github/github.module';
+import { SyncModule } from './sync/sync.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -40,6 +41,7 @@ import { AppService } from './app.service';
     PerformanceModule,
     PostHackathonModule,
     GitHubModule,
+    SyncModule,
   ],
   controllers: [AppController],
   providers: [AppService],

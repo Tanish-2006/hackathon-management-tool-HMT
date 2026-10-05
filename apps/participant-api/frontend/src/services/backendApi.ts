@@ -148,9 +148,9 @@ function unwrap<T>(res: any): T {
 }
 
 // ---------- Typed contracts ----------
-export type RegisterInput = { email: string; password: string; fullName: string };
+export type RegisterInput = { email: string; password: string; fullName: string; phoneNumber: string };
 export type LoginInput = { email: string; password: string };
-export type MeResponse = { id: string; email: string; fullName: string; role: string; isEmailVerified?: boolean; profile?: any; teamMemberships?: any[]; [k:string]: any };
+export type MeResponse = { id: string; email: string; fullName: string; role: string; isEmailVerified?: boolean; phoneNumber?: string | null; isPhoneVerified?: boolean; profile?: any; teamMemberships?: any[]; [k:string]: any };
 export type AuthResponse = {
   user: MeResponse;
   accessToken: string;
@@ -159,6 +159,7 @@ export type AuthResponse = {
   sessionId?: string;
   jti?: string;
   verificationToken?: string;
+  phoneOtp?: string; // Phase 1: dev-only raw OTP (absent in production)
   token?: string; // legacy
 };
 
@@ -201,6 +202,13 @@ export const hmtBackendService = {
   async verifyEmail(token: string): Promise<{ message: string }> {
     return fetchWithAuth('/auth/verify-email', { method: 'POST', body: JSON.stringify({ token }) });
   },
+  // Phase 1 phone identity: OTP resend + verify (JWT required).
+  async requestPhoneOtp(phoneNumber: string): Promise<{ message: string; expiresIn?: string; phoneOtp?: string }> {
+    return fetchWithAuth('/auth/phone/request-otp', { method: 'POST', body: JSON.stringify({ phoneNumber }) });
+  },
+  async verifyPhoneOtp(phoneNumber: string, otp: string): Promise<{ message: string }> {
+    return fetchWithAuth('/auth/phone/verify', { method: 'POST', body: JSON.stringify({ phoneNumber, otp }) });
+  },
   async forgotPassword(email: string): Promise<{ message: string; resetToken?: string }> {
     return fetchWithAuth('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) });
   },
@@ -236,13 +244,29 @@ export const hmtBackendService = {
   },
   logoutLocal() { clearAuthTokens(); },
 
-  // ---------- Hackathons ----------
+  // ---------- Hackathons (Discover → Details → Register → My) ----------
   async getCurrentHackathon(): Promise<any> { const res = await fetchWithAuth('/hackathons/current'); return unwrap<any>(res); },
+  async listHackathons(params: Record<string,string|number>={}): Promise<any> {
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).map(([k,v])=>[k,String(v)]))).toString();
+    const res = await fetchWithAuth(`/hackathons${qs?'?'+qs:''}`); return unwrap<any>(res);
+  },
   async getHackathonById(id: string): Promise<any> { const res = await fetchWithAuth(`/hackathons/${id}`); return unwrap<any>(res); },
   async getHackathonResources(id: string): Promise<any> { const res = await fetchWithAuth(`/hackathons/${id}/resources`); return unwrap<any>(res); },
   async getHackathonAnnouncements(id: string): Promise<any> { const res = await fetchWithAuth(`/hackathons/${id}/announcements`); return unwrap<any>(res); },
   async getHackathonPhases(id: string): Promise<any> { const res = await fetchWithAuth(`/hackathons/${id}/phases`); return unwrap<any>(res); },
   async getProblemStatement(id: string): Promise<any> { const res = await fetchWithAuth(`/hackathons/${id}/problem-statement`); return unwrap<any>(res); },
+  async registerForHackathon(id: string, data: { teamChoice?: string; teamId?: string }={}): Promise<any> {
+    const res = await fetchWithAuth(`/hackathons/${id}/register`, { method: 'POST', body: JSON.stringify(data) }); return unwrap<any>(res);
+  },
+  async getMyHackathons(bucket?: string): Promise<any> {
+    const qs = bucket ? `?bucket=${encodeURIComponent(bucket)}` : '';
+    const res = await fetchWithAuth(`/hackathons/my${qs}`); return unwrap<any>(res);
+  },
+  async getMyRegistrations(): Promise<any> { const res = await fetchWithAuth('/hackathons/registrations/me'); return unwrap<any>(res); },
+  async getAiAccessStatus(projectId?: string): Promise<any> {
+    const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+    const res = await fetchWithAuth(`/ai/access-status${qs}`); return unwrap<any>(res);
+  },
 
   // ---------- Profile & SkillProfile ----------
   async getProfile(): Promise<any> { const res = await fetchWithAuth('/profile'); return unwrap<any>(res); },

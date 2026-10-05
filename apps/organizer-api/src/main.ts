@@ -19,6 +19,7 @@ import { mentorRoutes } from './modules/mentor/mentor.routes';
 import { participantsRoutes } from './modules/participants/participants.routes';
 import { syncRoutes } from './modules/sync/sync.routes';
 import { analyticsRoutes } from './modules/analytics/analytics.routes';
+import { overviewRoutes } from './modules/overview/overview.routes';
 
 const startTime = Date.now();
 
@@ -291,6 +292,7 @@ async function buildApp(): Promise<FastifyInstance> {
       await participantsRoutes(instance, { jwtConfig });
       await syncRoutes(instance, { jwtConfig });
       await analyticsRoutes(instance, { jwtConfig });
+      await overviewRoutes(instance, { jwtConfig });
     },
     { prefix: '/api/v1' },
   );

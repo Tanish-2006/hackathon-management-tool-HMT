@@ -1,5 +1,8 @@
-import { IsEmail, IsString, MinLength, IsOptional } from 'class-validator';
+import { IsEmail, IsString, MinLength, IsOptional, Matches, Length } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+// E.164: leading +, country code, 8-15 digits total (ITU-T E.164).
+export const E164_PATTERN = /^\+[1-9]\d{7,14}$/;
 
 export class RegisterDto {
   @ApiProperty({
@@ -17,6 +20,14 @@ export class RegisterDto {
   @ApiProperty({ example: 'Alex Doe' })
   @IsString()
   fullName: string;
+
+  @ApiProperty({
+    example: '+919876543210',
+    description: 'Unique participant phone number in E.164 format',
+  })
+  @IsString()
+  @Matches(E164_PATTERN, { message: 'phoneNumber must be in E.164 format (e.g. +919876543210)' })
+  phoneNumber: string;
 }
 
 export class LoginDto {
@@ -75,4 +86,27 @@ export class PasswordResetConfirmDto {
   @IsString()
   @MinLength(8)
   newPassword: string;
+}
+
+export class RequestPhoneOtpDto {
+  @ApiProperty({
+    example: '+919876543210',
+    description: 'Resend OTP to the phone number on your account (E.164)',
+  })
+  @IsString()
+  @Matches(E164_PATTERN, { message: 'phoneNumber must be in E.164 format (e.g. +919876543210)' })
+  phoneNumber: string;
+}
+
+export class VerifyPhoneDto {
+  @ApiProperty({ example: '+919876543210' })
+  @IsString()
+  @Matches(E164_PATTERN, { message: 'phoneNumber must be in E.164 format (e.g. +919876543210)' })
+  phoneNumber: string;
+
+  @ApiProperty({ example: '482913', description: '6-digit OTP sent to the phone number' })
+  @IsString()
+  @Length(6, 6, { message: 'OTP must be 6 digits' })
+  @Matches(/^\d{6}$/, { message: 'OTP must be 6 digits' })
+  otp: string;
 }

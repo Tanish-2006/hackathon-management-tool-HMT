@@ -30,52 +30,63 @@ export class PrivacyService {
 
   filterTeamForParticipant(team: any, requester: any, isMember: boolean) {
     if (isMember) return team;
-    // non-member sees only discoverable subset
-    if (team.visibility === VisibilityLevel.TEAM_PRIVATE) {
-      // hide private fields
-      const { inviteCode, ...publicPart } = team;
+    // Privacy-first matching: non-members see ONLY skills/role/availability,
+    // never repoUrl, inviteCode, private discussions, or full project internals.
+    const { inviteCode: _invite, project: _project, ...rest } = team ?? {};
+    if (team?.visibility === VisibilityLevel.TEAM_PRIVATE) {
       return {
-        id: publicPart.id,
-        name: publicPart.name,
-        hackathonId: publicPart.hackathonId,
-        visibility: publicPart.visibility,
-        requiredSkills: publicPart.requiredSkills,
-        isDiscoverable: publicPart.isDiscoverable,
-        memberCount: publicPart.members?.length ?? 0,
-        // do not expose private project details, repoUrl, discussions
+        id: rest.id,
+        name: rest.name,
+        hackathonId: rest.hackathonId,
+        visibility: rest.visibility,
+        requiredSkills: rest.requiredSkills,
+        isDiscoverable: rest.isDiscoverable,
+        memberCount: rest.members?.length ?? team?.members?.length ?? 0,
       };
     }
-    return team;
+    // TEAM_DISCOVERABLE non-member: same minimal projection (fix prior full leak).
+    return {
+      id: rest.id,
+      name: rest.name,
+      hackathonId: rest.hackathonId,
+      visibility: rest.visibility,
+      requiredSkills: rest.requiredSkills ?? [],
+      isDiscoverable: rest.isDiscoverable ?? true,
+      memberCount: rest.members?.length ?? team?.members?.length ?? 0,
+      skills: rest.skills ?? undefined,
+      rolesNeeded: rest.rolesNeeded ?? undefined,
+      experienceLevel: rest.experienceLevel ?? undefined,
+      availability: rest.availability ?? undefined,
+    };
   }
 
   filterProjectForParticipant(
     project: any,
     requesterTeamId: string | null,
     isMember: boolean,
+    hasGrant = false,
   ) {
     if (!project) return null;
-    if (project.visibility === VisibilityLevel.PUBLIC_PROFILE) return project;
-    if (project.visibility === VisibilityLevel.TEAM_DISCOVERABLE && isMember)
-      return project;
-    if (project.visibility === VisibilityLevel.TEAM_PRIVATE && isMember)
-      return project;
-    if (isMember) return project;
-    // not member -> hide private repoUrl and private discussions
-    if (project.visibility === VisibilityLevel.TEAM_PRIVATE) {
-      return {
-        id: project.id,
-        title: project.title,
-        techStack: project.techStack,
-        status: project.status,
-        visibility: project.visibility,
-        // repoUrl hidden
-        // description truncated
-        description:
-          project.visibility === VisibilityLevel.PUBLIC_PROFILE
-            ? project.description
-            : 'Private project - join team to view details',
-      };
+    if (isMember && hasGrant) return project;
+    if (project.visibility === VisibilityLevel.PUBLIC_PROFILE) {
+      if (hasGrant) return project;
+      const { repoUrl: _r, ...pub } = project;
+      // Public still hides repoUrl without an explicit grant (authorized sharing only).
+      return pub;
     }
-    return project;
+    if (isMember) {
+      // Member without grant: metadata yes, repoUrl hidden until leader grants access.
+      const { repoUrl: _r, ...rest } = project;
+      return rest;
+    }
+    // Non-member: minimal card only — never repoUrl, architecture, or discussions.
+    return {
+      id: project.id,
+      title: project.title,
+      techStack: project.techStack,
+      status: project.status,
+      visibility: project.visibility,
+      description: 'Private project - join team to view details',
+    };
   }
 }

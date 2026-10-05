@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'wouter';
-import { motion } from 'framer-motion';
-import { ArrowRight, Calendar, MapPin, Layers, Megaphone, Trophy, ShieldCheck, Loader2, AlertCircle, Search, Filter, Clock3 } from 'lucide-react';
+import { ArrowRight, Calendar, Search, Loader2, AlertCircle, ShieldCheck, Megaphone, Clock3, Users, Trophy } from 'lucide-react';
 import { hmtBackendService, ApiError } from '@/services/backendApi';
 import { cn } from '@/lib/utils';
 
@@ -12,100 +11,188 @@ function Badge({ children, tone='muted' }: any){
   return <span className={cn("rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider", m[tone]||m.muted)}>{children}</span>
 }
 
+const TABS = ['Overview','Challenge','Eligibility','Timeline','Rules','Resources','Prizes','Judging','FAQs','Register'] as const;
+
 export default function ParticipantHackathons(){
-  const [hackathon,setHackathon]=useState<any>(null);
-  const [selected,setSelected]=useState<any>(null);
+  const [rows,setRows]=useState<any[]>([]);
+  const [total,setTotal]=useState(0);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState<string|null>(null);
+  const [search,setSearch]=useState('');
+  const [status,setStatus]=useState('');
+  const [mode,setMode]=useState('');
+  const [registration,setRegistration]=useState('');
+  const [selectedId,setSelectedId]=useState<string|null>(null);
+  const [detail,setDetail]=useState<any>(null);
+  const [detailLoading,setDetailLoading]=useState(false);
+  const [tab,setTab]=useState<typeof TABS[number]>('Overview');
+  const [registerMsg,setRegisterMsg]=useState<string|null>(null);
+  const [registering,setRegistering]=useState(false);
 
+  async function load(){
+    setLoading(true); setError(null);
+    try{
+      const res = await hmtBackendService.listHackathons({
+        ...(search.trim()?{search:search.trim()}:{}),
+        ...(status?{status}:{}),
+        ...(mode?{mode}:{}),
+        ...(registration?{registration}:{}),
+        pageSize: 30,
+      });
+      const data = Array.isArray(res) ? res : (res.data ?? []);
+      setRows(data);
+      setTotal(res.pagination?.total ?? data.length);
+      if(data.length && !selectedId) setSelectedId(data[0].id);
+    }catch(e){ setError(friendly(e)); }
+    finally{ setLoading(false); }
+  }
+
+  useEffect(()=>{ load(); },[]);
   useEffect(()=>{
+    if(!selectedId) { setDetail(null); return; }
     let m=true;
-    async function load(){
-      setLoading(true); setError(null);
-      try{
-        const cur = await hmtBackendService.getCurrentHackathon();
-        if(!m) return;
-        setHackathon(cur);
-        setSelected(cur);
-        if(cur?.id){
-          try{ const full = await hmtBackendService.getHackathonById(cur.id); setSelected(full); }catch{}
-        }
-      }catch(e){ if(m) setError(friendly(e)); }
-      finally{ if(m) setLoading(false); }
-    }
-    load(); return()=>{m=false}
-  },[]);
+    setDetailLoading(true);
+    hmtBackendService.getHackathonById(selectedId).then(d=>{ if(m){ setDetail(d); setTab('Overview'); setRegisterMsg(null);} }).catch(()=>{ if(m) setDetail(rows.find(r=>r.id===selectedId) ?? null); }).finally(()=>{ if(m) setDetailLoading(false); });
+    return ()=>{ m=false; };
+  },[selectedId]);
 
-  if(loading) return <div className="space-y-4"><div className="h-24 animate-pulse rounded-2xl bg-[#e9e5da]"/><div className="h-64 animate-pulse rounded-2xl bg-[#e9e5da]"/></div>
-  if(error) return <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-700 flex gap-3"><AlertCircle size={18}/><div><b>Could not load hackathons</b><p className="mt-1">{error}</p><button onClick={()=>location.reload()} className="mt-3 rounded-lg bg-[#171a2d] px-3 py-1.5 text-xs font-bold text-white">Retry</button></div></div>
+  const selected = detail ?? rows.find(r=>r.id===selectedId) ?? null;
+  const phases = selected?.phases ?? [];
+  const criteria = selected?.judgingCriteria ?? [];
+  const resources = selected?.resources ?? [];
+  const anns = selected?.announcements ?? [];
 
-  const phases = selected?.phases || hackathon?.phases || [];
-  const criteria = selected?.judgingCriteria || hackathon?.judgingCriteria || [];
-  const resources = selected?.resources || hackathon?.resources || [];
-  const anns = selected?.announcements || hackathon?.announcements || [];
+  async function register(){
+    if(!selected) return;
+    setRegistering(true); setRegisterMsg(null);
+    try{
+      await hmtBackendService.registerForHackathon(selected.id, { teamChoice: 'later' });
+      setRegisterMsg('Registered — see My Hackathons for next steps (team choice).');
+    }catch(e:any){
+      const msg = friendly(e);
+      // Skill-profile gate → direct to profile, never duplicate the form here.
+      setRegisterMsg(msg.includes('skill profile') ? 'Complete your skill profile first — then register. Your profile is reused for eligibility + team matching.' : msg);
+    }finally{ setRegistering(false); }
+  }
+
+  const filteredHint = useMemo(()=> `${total} published hackathon${total===1?'':'s'}`,[total]);
 
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Discover - Published only</div>
+          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Discover — Published only</div>
           <h1 className="mt-2 text-3xl font-bold tracking-[-.05em] text-[#171a2d]">Hackathons</h1>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-[#77798a]">Published hackathons visible to participants. Drafts stay private to organizers - you only see what is live.</p>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-[#77798a]">Search the canonical published list. Drafts stay private to organizers. {filteredHint}.</p>
         </div>
-        <div className="flex gap-2">
-          <Link href="/participant/dashboard" className="rounded-xl border border-[#dedbd1] px-4 py-2 text-xs font-bold">Back to dashboard</Link>
-          <a href="#details" className="rounded-xl bg-[#171a2d] px-4 py-2 text-xs font-bold text-white">View details</a>
+        <Link href="/participant/my-hackathons" className="rounded-xl bg-[#171a2d] px-4 py-2 text-xs font-bold text-white">My Hackathons</Link>
+      </div>
+
+      {/* Search + minimal filters (Unstop/Hack2Skill pattern) */}
+      <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-4">
+        <div className="flex flex-col gap-3 lg:flex-row">
+          <label className="flex flex-1 items-center gap-2 rounded-xl border border-[#dedbd1] bg-white px-3 py-2">
+            <Search size={15} className="text-[#77798a]"/>
+            <input value={search} onChange={e=>setSearch(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter') load(); }} placeholder="Search title, organizer, theme, tags…" className="w-full bg-transparent text-sm outline-none"/>
+          </label>
+          <select value={status} onChange={e=>setStatus(e.target.value)} className="rounded-xl border border-[#dedbd1] bg-white px-3 py-2 text-xs font-semibold">
+            <option value="">All statuses</option>
+            <option value="REGISTRATION_OPEN">Registration open</option>
+            <option value="REGISTRATION_CLOSED">Registration closed</option>
+            <option value="LIVE">Live</option>
+            <option value="SUBMISSION">Submission</option>
+            <option value="EVALUATION">Evaluation</option>
+            <option value="COMPLETED">Completed</option>
+          </select>
+          <select value={mode} onChange={e=>setMode(e.target.value)} className="rounded-xl border border-[#dedbd1] bg-white px-3 py-2 text-xs font-semibold">
+            <option value="">All modes</option>
+            <option value="ONLINE">Online</option>
+            <option value="OFFLINE">Offline</option>
+            <option value="HYBRID">Hybrid</option>
+          </select>
+          <select value={registration} onChange={e=>setRegistration(e.target.value)} className="rounded-xl border border-[#dedbd1] bg-white px-3 py-2 text-xs font-semibold">
+            <option value="">Registration: all</option>
+            <option value="open">Open</option>
+            <option value="closed">Closed</option>
+          </select>
+          <button onClick={load} className="rounded-xl bg-[#f26a4f] px-4 py-2 text-xs font-bold text-white">Search</button>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        {hackathon ? (
-          <motion.button key={hackathon.id || 'h'} onClick={()=>setSelected(hackathon)} className={cn("text-left rounded-2xl border p-5 transition-all hover:-translate-y-0.5", selected?.id===hackathon.id ? "border-[#f26a4f] bg-[#fdfbf5]" : "border-[#dedbd1] bg-[#fdfbf5] hover:border-[#f26a4f]/50")}>
-            <div className="flex items-center justify-between"><Badge tone="lime">PUBLISHED</Badge><ArrowRight size={16} className="text-[#77798a]"/></div>
-            <h3 className="mt-6 text-lg font-bold tracking-tight">{hackathon.title || hackathon.name || 'HMT Global AI Hackathon 2026'}</h3>
-            <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#77798a]">{hackathon.description}</p>
-            <div className="mt-4 flex items-center gap-3 text-xs text-[#77798a]"><Calendar size={12}/>{hackathon.startDate ? new Date(hackathon.startDate).toLocaleDateString() : 'Apr 18-20, 2026'}<MapPin size={12}/>{hackathon.location || 'Online + hubs'}</div>
-            <div className="mt-3 flex gap-2">{(hackathon.phases||[]).slice(0,2).map((p:any,idx:number)=><span key={idx} className="rounded-full bg-[#f4f1e8] px-2 py-1 text-[10px] font-bold uppercase">{p.name || p.status}</span>)}</div>
-          </motion.button>
-        ) : (
-          <div className="rounded-2xl border border-dashed border-[#dedbd1] p-8 text-center md:col-span-3"><Layers size={20} className="mx-auto text-[#aaa9a2]"/><p className="mt-2 text-sm font-semibold">No published hackathons</p><p className="text-xs text-[#77798a]">Check back when organizer publishes the next event.</p></div>
-        )}
-      </div>
+      {loading ? <div className="flex items-center gap-2 text-sm text-[#77798a]"><Loader2 size={16} className="animate-spin"/> Loading published hackathons…</div>
+      : error ? <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-700 flex gap-3"><AlertCircle size={18}/><div><b>Could not load hackathons</b><p className="mt-1">{error}</p><button onClick={load} className="mt-3 rounded-lg bg-[#171a2d] px-3 py-1.5 text-xs font-bold text-white">Retry</button></div></div>
+      : (
+      <div className="grid gap-6 lg:grid-cols-[.9fr_1.1fr]">
+        {/* Compact list rows (not card grid) */}
+        <div className="overflow-hidden rounded-2xl border border-[#dedbd1] bg-[#fdfbf5]">
+          <div className="border-b border-[#e5e1d7] px-4 py-3 font-mono text-[10px] uppercase tracking-[.14em] text-[#77798a]">Hackathon | Mode | Registration ends | Status | Action</div>
+          {rows.length ? rows.map(r=>(
+            <button key={r.id} onClick={()=>setSelectedId(r.id)} className={cn("flex w-full items-center gap-3 border-b border-[#f0ede4] px-4 py-3 text-left hover:bg-[#f4f1e8]", selectedId===r.id && "bg-[#fff7ea]")}>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-bold">{r.title}</div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-[#77798a]">
+                  <span>{r.organizer ?? 'HMT'}</span><span>·</span><span>{r.mode}</span><span>·</span>
+                  <span className="inline-flex items-center gap-1"><Calendar size={11}/> {r.registrationEnd ? new Date(r.registrationEnd).toLocaleDateString() : (r.eventStart ? new Date(r.eventStart).toLocaleDateString() : '—')}</span>
+                </div>
+              </div>
+              <Badge tone={r.derivedStatus==='REGISTRATION_OPEN'?'lime':r.derivedStatus==='LIVE'||r.derivedStatus==='SUBMISSION'?'coral':'muted'}>{r.derivedStatus}</Badge>
+              <ArrowRight size={15} className="shrink-0 text-[#77798a]"/>
+            </button>
+          )) : <div className="p-8 text-center text-sm text-[#77798a]">No published hackathons match. Try clearing filters.</div>}
+        </div>
 
-      <div id="details" className="grid gap-6 lg:grid-cols-[1.35fr_.65fr]">
-        <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6">
-          <div className="flex items-center justify-between"><h2 className="text-lg font-bold tracking-tight">{selected?.title || 'Hackathon details'}</h2><Badge tone="dark">ID {String(selected?.id||'-').slice(0,8)}</Badge></div>
-          <p className="mt-3 text-sm leading-6 text-[#77798a]">{selected?.description || '-'}</p>
-          <div className="mt-6 rounded-xl bg-[#f4f1e8] p-4">
-            <div className="text-xs font-bold flex items-center gap-2"><ShieldCheck size={14} className="text-[#5aafbd]"/> Problem statement</div>
-            <p className="mt-2 text-sm leading-6 text-[#171a2d]">{selected?.problemStatement || 'Build an AI-powered software engineering companion and developer platform.'}</p>
-            <div className="mt-3 text-xs text-[#77798a]">Rules: {(selected?.rules || ['Open Source Code','AST Scan compliant','Original work']).join(' - ')}</div>
-          </div>
-          <div className="mt-6 grid gap-4 sm:grid-cols-2">
-            <div><div className="text-xs font-bold">Phases</div><div className="mt-2 space-y-2">{phases.length ? phases.map((p:any,i:number)=><div key={i} className="flex items-center justify-between rounded-xl border border-[#e5e1d7] px-3 py-2 text-xs"><span className="font-semibold">{p.name || 'Phase '+(i+1)}</span><span className={cn("rounded-full px-2 py-1 text-[10px] font-bold", p.status==='ACTIVE'?"bg-[#d8e35b] text-[#171a2d]":"bg-[#e9e5da] text-[#77798a]")}>{p.status}</span></div>) : <div className="text-xs text-[#77798a]">No phases configured</div>}</div></div>
-            <div><div className="text-xs font-bold">Judging criteria</div><div className="mt-2 space-y-2">{criteria.length ? criteria.map((c:any,i:number)=><div key={i} className="flex justify-between rounded-xl bg-[#f4f1e8] px-3 py-2 text-xs"><span>{c.name || c.criteria}</span><span className="font-mono font-bold">{c.weight?Math.round(c.weight*100)+'%':'-'}</span></div>) : <div className="text-xs text-[#77798a]">Technical Depth 35% - AI Teammate 35% - UX 30%</div>}</div></div>
-          </div>
-          <div className="mt-6"><div className="text-xs font-bold">Resources</div><div className="mt-2 grid gap-2 sm:grid-cols-2">{resources.length ? resources.map((r:any,i:number)=><a key={i} href={r.url} target="_blank" rel="noreferrer" className="flex items-center justify-between rounded-xl border border-[#dedbd1] px-3 py-2 text-xs hover:bg-[#f4f1e8]"><span className="font-semibold">{r.name}</span><span className="text-[#5aafbd]">Open</span></a>) : <div className="text-xs text-[#77798a]">Participant API Specs - Neo4j Graph Schema</div>}</div></div>
-        </div>
-        <div className="space-y-6">
-          <div className="rounded-2xl bg-[#171a2d] p-6 text-[#fdfbf5]">
-            <div className="font-mono text-[10px] uppercase tracking-[.16em] text-[#d8e35b]">Announcements - Published only</div>
-            <div className="mt-4 space-y-3">
-              {anns.length ? anns.map((a:any)=><div key={a.id} className="rounded-xl bg-[#252941] p-3"><div className="text-xs font-bold flex items-center gap-2"><Megaphone size={14} className="text-[#d8e35b]"/>{a.title}</div><p className="mt-1 text-xs leading-5 text-[#b9bdca]">{a.content}</p><div className="mt-2 font-mono text-[10px] text-[#9b9fb1]">{a.createdAt ? new Date(a.createdAt).toLocaleString() : ''}</div></div>) : <div className="rounded-xl bg-[#252941] p-4 text-xs text-[#9b9fb1]">No published announcements yet.</div>}
-            </div>
-            <div className="mt-4 text-[11px] leading-5 text-[#9b9fb1]">Organizer-only and mentor-only announcements are never exposed to participants.</div>
-          </div>
-          <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6">
-            <h3 className="font-bold flex items-center gap-2"><Clock3 size={16}/> Key dates</h3>
-            <div className="mt-4 space-y-3 text-xs">
-              <div className="flex justify-between border-b border-[#e5e1d7] py-2"><span className="text-[#77798a]">Start</span><b>{selected?.startDate ? new Date(selected.startDate).toLocaleString() : '-'}</b></div>
-              <div className="flex justify-between border-b border-[#e5e1d7] py-2"><span className="text-[#77798a]">End</span><b>{selected?.endDate ? new Date(selected.endDate).toLocaleString() : '-'}</b></div>
-              <div className="flex justify-between py-2"><span className="text-[#77798a]">Submission closes</span><b>18:00 Today</b></div>
-            </div>
-            <Link href="/participant/projects" className="mt-4 flex items-center justify-center gap-2 rounded-xl bg-[#f26a4f] px-3 py-2 text-xs font-bold text-white">Continue building <ArrowRight size={14}/></Link>
-          </div>
+        {/* Detail with tabs */}
+        <div id="details" className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6">
+          {detailLoading ? <div className="text-sm text-[#77798a]">Loading details…</div> : selected ? (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-bold tracking-tight">{selected.title}</h2>
+                <Badge tone="dark">{selected.derivedStatus ?? selected.status}</Badge>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-[#77798a]">{selected.description}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {TABS.map(t=>(
+                  <button key={t} onClick={()=>setTab(t)} className={cn("rounded-full px-3 py-1.5 text-[11px] font-bold", tab===t ? "bg-[#171a2d] text-white" : "bg-[#f4f1e8] text-[#55586a] hover:bg-[#e9e5da]")}>{t}</button>
+                ))}
+              </div>
+              <div className="mt-5 text-sm leading-6">
+                {tab==='Overview' && <p className="text-[#33364a]">{selected.description}</p>}
+                {tab==='Challenge' && <p>{selected.problemStatement ?? selected.description ?? 'Open innovation — propose your own solution under the theme.'}</p>}
+                {tab==='Eligibility' && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs font-bold"><Users size={14}/> Who can participate</div>
+                    <ul className="list-disc pl-5 text-[#33364a]">{(selected.eligibility?.length?selected.eligibility:['Open to all']).map((e:string)=><li key={e}>{e}</li>)}</ul>
+                    <div className="text-xs text-[#77798a]">Team size: {selected.teamSize ? `${selected.teamSize.min}–${selected.teamSize.max}` : 'see rules'}</div>
+                  </div>
+                )}
+                {tab==='Timeline' && (
+                  <div className="space-y-2">{phases.length?phases.map((p:any,i:number)=><div key={i} className="flex justify-between rounded-xl border border-[#e5e1d7] px-3 py-2 text-xs"><span className="font-semibold">{p.name}</span><span>{p.startsAt?new Date(p.startsAt).toLocaleDateString():''} → {p.endsAt?new Date(p.endsAt).toLocaleDateString():''}</span></div>):<span className="text-[#77798a]">Timeline published by organizer.</span>}</div>
+                )}
+                {tab==='Rules' && <ul className="list-disc pl-5">{(selected.rules??[]).map((r:string,i:number)=><li key={i}>{r}</li>)}</ul>}
+                {tab==='Resources' && <div className="grid gap-2">{resources.map((r:any,i:number)=><a key={i} href={r.url} target="_blank" rel="noreferrer" className="rounded-xl border border-[#dedbd1] px-3 py-2 text-xs hover:bg-[#f4f1e8]">{r.name ?? r.title}</a>)}</div>}
+                {tab==='Prizes' && <p className="text-[#77798a]">Prizes announced by organizer{selected.prizes?`: ${(selected.prizes as any[]).map((p:any)=>p.title).join(', ')}`:'.'}</p>}
+                {tab==='Judging' && <div className="space-y-2">{criteria.map((c:any,i:number)=><div key={i} className="flex justify-between rounded-xl bg-[#f4f1e8] px-3 py-2 text-xs"><span>{c.name}</span><span className="font-mono font-bold">{c.weight?Math.round(c.weight*100)+'%':'—'}</span></div>)}</div>}
+                {tab==='FAQs' && <p className="text-[#77798a]">FAQs published by organizer appear here.</p>}
+                {tab==='Register' && (
+                  <div className="rounded-xl bg-[#f4f1e8] p-4">
+                    <div className="flex items-center gap-2 text-xs font-bold"><ShieldCheck size={14} className="text-[#5aafbd]"/> Registration uses your skill profile — no repeated forms</div>
+                    <button onClick={register} disabled={registering} className="mt-3 rounded-xl bg-[#f26a4f] px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{registering?'Registering…':'Register for this hackathon'}</button>
+                    {registerMsg && <p className="mt-2 text-xs text-[#55586a]">{registerMsg} <Link href="/participant/profile" className="underline">Open skill profile</Link></p>}
+                    <div className="mt-3 flex items-center gap-2 text-[11px] text-[#77798a]"><Clock3 size={12}/> Registration ends: {selected.registrationEnd?new Date(selected.registrationEnd).toLocaleString():'see timeline'} · <Trophy size={12}/> Team choice after confirm → My Hackathons</div>
+                  </div>
+                )}
+              </div>
+              {!!anns.length && (
+                <div className="mt-6 rounded-2xl bg-[#171a2d] p-4 text-[#fdfbf5]">
+                  <div className="font-mono text-[10px] uppercase tracking-[.16em] text-[#d8e35b] flex items-center gap-2"><Megaphone size={13}/> Announcements — published only</div>
+                  <div className="mt-2 space-y-2">{anns.slice(0,3).map((a:any)=><div key={a.id} className="rounded-xl bg-[#252941] p-3 text-xs"><b>{a.title}</b><p className="text-[#b9bdca]">{a.content}</p></div>)}</div>
+                </div>
+              )}
+            </>
+          ) : <div className="text-sm text-[#77798a]">Select a hackathon to see details.</div>}
         </div>
       </div>
+      )}
     </div>
   );
 }

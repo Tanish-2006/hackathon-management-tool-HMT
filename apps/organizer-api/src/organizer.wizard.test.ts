@@ -47,9 +47,9 @@ describe('Organizer wizard automation', () => {
     app = await buildApp();
     await app.ready();
     memoryStore.clear();
-    const org = await app.inject({ method: 'POST', url: '/api/v1/auth/register', payload: { email: 'wizard-org@test.hmt', password: 'Str0ngPass123!', displayName: 'Wizard Org', role: 'ORGANIZER' } });
+    const org = await app.inject({ method: 'POST', url: '/api/v1/auth/register', payload: { email: 'wizard-org@test.hmt', password: 'Str0ngPass123!', displayName: 'Wizard Org', role: 'ORGANIZER', phoneNumber: '+14155550011' } });
     orgToken = JSON.parse(org.body).accessToken;
-    const part = await app.inject({ method: 'POST', url: '/api/v1/auth/register', payload: { email: 'wizard-part@test.hmt', password: 'Str0ngPass123!', displayName: 'Wizard Part', role: 'PARTICIPANT' } });
+    const part = await app.inject({ method: 'POST', url: '/api/v1/auth/register', payload: { email: 'wizard-part@test.hmt', password: 'Str0ngPass123!', displayName: 'Wizard Part', role: 'PARTICIPANT', phoneNumber: '+14155550012' } });
     participantToken = JSON.parse(part.body).accessToken;
   });
 

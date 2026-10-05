@@ -24,6 +24,10 @@ export default function OrganizerHackathonDetail(){
   const [actionMsg,setActionMsg]=useState<string|null>(null);
   const [actionErr,setActionErr]=useState<string|null>(null);
   const [busy,setBusy]=useState(false);
+  // Archive danger zone: modal visibility + mandatory acknowledgement checkbox.
+  const [showArchive, setShowArchive] = useState(false);
+  const [archiveChecked, setArchiveChecked] = useState(false);
+  const [archiving, setArchiving] = useState(false);
 
   const load = async()=>{
     setLoading(true); setError(null);
@@ -52,14 +56,26 @@ export default function OrganizerHackathonDetail(){
   };
   useEffect(()=>{ if(id) load(); },[id]);
 
-  async function doTransition(kind:'review'|'confirm'|'publish'|'archive'){
+  async function doArchive(){
+    // Confirm button is disabled until the checkbox is checked; double-guard here.
+    if (!archiveChecked || archiving) return;
+    setArchiving(true); setActionMsg(null); setActionErr(null);
+    try{
+      const res:any = await organizerApi.transitionArchive(id);
+      const updated = res.hackathon || res;
+      setHackathon(updated);
+      setActionMsg(`Hackathon archived — now read-only`);
+      setShowArchive(false); setArchiveChecked(false);
+    }catch(e:any){ setActionErr(e.message)} finally{ setArchiving(false)}
+  }
+
+  async function doTransition(kind:'review'|'confirm'|'publish'){
     setBusy(true); setActionMsg(null); setActionErr(null);
     try{
       let res:any;
       if(kind==='review') res=await organizerApi.transitionReview(id);
       if(kind==='confirm') res=await organizerApi.transitionConfirm(id);
       if(kind==='publish') res=await organizerApi.transitionPublish(id);
-      if(kind==='archive') res=await organizerApi.transitionArchive(id);
       const updated = res.hackathon || res;
       setHackathon(updated);
       setActionMsg(`Transition to ${updated.status} successful`);
@@ -95,15 +111,56 @@ export default function OrganizerHackathonDetail(){
       {/* Publish controls */}
       <Card className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2 text-xs">
-          <ShieldCheck size={16} className="text-[#5aafbd]"/><span className="font-bold">Publish controls</span><span className="text-[#77798a]">DRAFT→REVIEW→CONFIRMED→PUBLISHED→ARCHIVED</span>
+          <ShieldCheck size={16} className="text-[#5aafbd]"/><span className="font-bold">Publish controls</span><span className="text-[#77798a]">DRAFT→REVIEW→CONFIRMED→PUBLISHED</span>
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={()=>doTransition('review')} disabled={busy || hackathon.status!=='DRAFT'} className="rounded-xl bg-[#5aafbd] px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{busy?'…':'→ REVIEW'}</button>
           <button onClick={()=>doTransition('confirm')} disabled={busy || hackathon.status!=='REVIEW'} className="rounded-xl bg-[#f26a4f] px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{busy?'…':'→ CONFIRMED'}</button>
           <button onClick={()=>doTransition('publish')} disabled={busy || !publishReady} className="rounded-xl bg-[#d8e35b] px-3 py-2 text-xs font-bold text-[#171a2d] disabled:opacity-40">{busy?'…':'→ PUBLISHED'}</button>
-          <button onClick={()=>doTransition('archive')} disabled={busy || hackathon.status!=='PUBLISHED'} className="rounded-xl bg-[#171a2d] px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{busy?'…':'→ ARCHIVED'}</button>
         </div>
       </Card>
+
+      {hackathon.status==='ARCHIVED' && <div className="rounded-2xl border border-[#dedbd1] bg-[#171a2d] p-4 flex items-start gap-3"><ShieldCheck size={16} className="mt-0.5 text-[#d8e35b]"/><div className="text-xs leading-5"><b className="text-white">ARCHIVED</b><span className="text-[#b9bdca]"> — This hackathon is archived and read-only.</span></div></div>}
+
+      {/* Administrative actions — archive lives here, never with publish controls */}
+      {hackathon.status==='PUBLISHED' && (
+        <Card className="p-4 border-red-200">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-xs">
+              <div className="font-bold">Administrative Actions</div>
+              <div className="mt-1 text-[#77798a]">Archive this completed hackathon and make it read-only.</div>
+            </div>
+            <button onClick={()=>{ setArchiveChecked(false); setShowArchive(true); }} disabled={busy} className="rounded-xl border border-red-300 px-4 py-2 text-xs font-bold text-[#d74635] hover:bg-red-50 disabled:opacity-40">Archive Hackathon</button>
+          </div>
+        </Card>
+      )}
+
+      {showArchive && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[#171a2d]/60 p-5" role="dialog" aria-modal="true" aria-label="Archive this hackathon?">
+          <div className="w-full max-w-md rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6">
+            <h2 className="text-lg font-bold tracking-tight">Archive this hackathon?</h2>
+            <p className="mt-2 text-xs leading-5 text-[#77798a]">Archiving permanently closes this hackathon for normal operational activity. The hackathon and its historical data will remain available in read-only mode.</p>
+            <ul className="mt-3 list-disc space-y-1 pl-5 text-xs leading-5 text-[#51546a]">
+              <li>Registration will be closed.</li>
+              <li>Participants and teams cannot be modified through normal workflows.</li>
+              <li>New submissions cannot be accepted.</li>
+              <li>Evaluations cannot be changed through normal workflows.</li>
+              <li>Hackathon configuration becomes read-only.</li>
+              <li>Historical data, results, projects, and analytics remain available.</li>
+              <li>The archived state is terminal in the normal workflow.</li>
+              <li>This action cannot be undone through the normal UI workflow.</li>
+            </ul>
+            <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-xl bg-[#f4f1e8] p-3 text-xs font-semibold">
+              <input type="checkbox" checked={archiveChecked} onChange={e=>setArchiveChecked(e.target.checked)} className="mt-0.5"/>
+              <span>I understand that this hackathon will become archived and read-only.</span>
+            </label>
+            <div className="mt-4 flex gap-2">
+              <button onClick={doArchive} disabled={!archiveChecked || archiving} className="flex-1 rounded-xl bg-[#d74635] px-4 py-2.5 text-xs font-bold text-white disabled:opacity-40">{archiving ? 'Archiving…' : 'Archive Hackathon'}</button>
+              <button onClick={()=>{ setShowArchive(false); setArchiveChecked(false); }} disabled={archiving} className="flex-1 rounded-xl border border-[#dedbd1] px-4 py-2.5 text-xs font-bold disabled:opacity-40">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Hero */}
       <div className="grid gap-6 lg:grid-cols-[1.4fr_.8fr]">
@@ -159,8 +216,8 @@ export default function OrganizerHackathonDetail(){
                   <div className="flex items-center justify-between"><span className="text-xs font-bold">#{p.order} {p.name}</span><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${p.status==='ACTIVE'?'bg-[#d8e35b] text-[#171a2d]': p.status==='COMPLETED'?'bg-[#5aafbd] text-white':'bg-[#f4f1e8] text-[#77798a]'}`}>{p.status}</span></div>
                   <div className="mt-2 text-xs text-[#77798a]">{new Date(p.startsAt).toLocaleDateString()} → {new Date(p.endsAt).toLocaleDateString()}</div>
                   <div className="mt-2 flex gap-1">
-                    <button onClick={async()=>{ const n=prompt('Edit phase name',p.name); if(!n) return; try{ await organizerApi.updatePhase(p.id,{name:n}); load()}catch(e:any){setActionErr(e.message)}}} className="rounded-lg border border-[#dedbd1] px-2 py-1 text-[11px] font-semibold"><Edit2 size={10} className="inline"/> Edit</button>
-                    <button onClick={async()=>{ if(!confirm('Delete phase?')) return; try{ await organizerApi.deletePhase(p.id); setPhases(prev=>prev.filter(x=>x.id!==p.id))}catch(e:any){setActionErr(e.message)}}} className="rounded-lg border border-[#dedbd1] px-2 py-1 text-[11px] font-semibold text-[#f26a4f]"><Trash2 size={10} className="inline"/> Del</button>
+                    <button onClick={async()=>{ const n=prompt('Edit phase name',p.name); if(!n) return; try{ await organizerApi.updatePhase(p.id,{name:n}); load()}catch(e:any){setActionErr(e.message)}}} disabled={hackathon.status==='ARCHIVED'} className="rounded-lg border border-[#dedbd1] px-2 py-1 text-[11px] font-semibold disabled:opacity-40"><Edit2 size={10} className="inline"/> Edit</button>
+                    <button onClick={async()=>{ if(!confirm('Delete phase?')) return; try{ await organizerApi.deletePhase(p.id); setPhases(prev=>prev.filter(x=>x.id!==p.id))}catch(e:any){setActionErr(e.message)}}} disabled={hackathon.status==='ARCHIVED'} className="rounded-lg border border-[#dedbd1] px-2 py-1 text-[11px] font-semibold text-[#f26a4f] disabled:opacity-40"><Trash2 size={10} className="inline"/> Del</button>
                   </div>
                 </div>
               ))}
@@ -203,7 +260,7 @@ export default function OrganizerHackathonDetail(){
         <Card className="p-6">
           <div className="flex items-center justify-between"><h3 className="font-bold flex items-center gap-2"><Users size={16}/> Mentors & assignments</h3><span className="font-mono text-xs text-[#77798a]">{assignments.length}</span></div>
           <div className="mt-4 space-y-2">
-            {assignments.length ? assignments.map((a:any)=><div key={a.id} className="flex justify-between rounded-xl border border-[#e5e1d7] bg-white px-3 py-2 text-sm"><span>Mentor {a.mentorId.slice(0,8)} → Team {a.teamId.slice(0,12)}</span><span className="text-xs text-[#77798a]">{new Date(a.assignedAt).toLocaleDateString()}</span></div>) : <div className="text-xs text-[#77798a]">No mentor assignments. Add in wizard Step 8.</div>}
+            {assignments.length ? assignments.map((a:any)=><div key={a.id} className="flex justify-between rounded-xl border border-[#e5e1d7] bg-white px-3 py-2 text-sm"><span>Mentor {a.mentorId.slice(0,8)} → Team {a.teamId.slice(0,12)}</span><span className="text-xs text-[#77798a]">{new Date(a.assignedAt).toLocaleDateString()}</span></div>) : <div className="text-xs text-[#77798a]">No mentor assignments. Manage mentors in the Mentors section.</div>}
           </div>
           <Link href="/organizer/mentors" className="mt-3 inline-flex text-xs font-bold text-[#5aafbd]">View all mentors <ChevronRight size={14}/></Link>
         </Card>

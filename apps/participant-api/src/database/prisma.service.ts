@@ -24,6 +24,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   private tokens = new Map<string, any>(); // tokenHash -> refreshToken
   private emailVerificationTokens = new Map<string, any>(); // tokenHash -> token
   private passwordResetTokens = new Map<string, any>();
+  private phoneVerifications = new Map<string, any>(); // otpHash -> phone OTP record
   private deviceSessions = new Map<string, any>(); // sessionId -> session
   private hackathons = new Map<string, any>();
   private announcements = new Map<string, any>();
@@ -58,6 +59,8 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   private aiRecommendations = new Map<string, any>();
   private aiInteractions = new Map<string, any>(); // persistent AI interaction log
   private auditLogs = new Map<string, any>();
+  private registrations = new Map<string, any>(); // registrationId -> { id, hackathonId, userId, status, ... }
+  private consumedEvents = new Map<string, any>(); // eventId -> { eventId, hackathonId, consumedAt }
 
   async   onModuleInit() {
     const isProd = process.env.NODE_ENV === 'production';
@@ -87,6 +90,8 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         if (where.email) {
           for (const u of this.users.values())
             if (u.email === where.email) found = u;
+        } else if (where.phoneNumber) {
+          for (const u of this.users.values()) if (u.phoneNumber === where.phoneNumber) found = u;
         } else if (where.id) found = this.users.get(where.id) || null;
         if (!found) return null;
         if (select) {
@@ -130,9 +135,20 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
       findMany: async ({ where }: any = {}) => {
         let arr = Array.from(this.users.values());
         if (where?.email) arr = arr.filter((u: any) => u.email === where.email);
+        if (where?.phoneNumber) arr = arr.filter((u: any) => u.phoneNumber === where.phoneNumber);
         return arr;
       },
       create: async ({ data, include }: any) => {
+        if (data.phoneNumber) {
+          for (const u of this.users.values()) {
+            if (u.phoneNumber === data.phoneNumber) {
+              // Mirror Prisma P2002 unique-violation so callers map it to 409.
+              throw Object.assign(new Error('Unique constraint failed on phoneNumber'), {
+                code: 'P2002',
+              });
+            }
+          }
+        }
         const id =
           data.id ||
           `user_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -143,6 +159,8 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
           fullName: data.fullName,
           role: data.role || 'PARTICIPANT',
           isEmailVerified: false,
+          phoneNumber: data.phoneNumber ?? null,
+          isPhoneVerified: false,
           createdAt: new Date(),
           updatedAt: new Date(),
         };
@@ -168,6 +186,15 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
       update: async ({ where, data }: any) => {
         const found = this.users.get(where.id);
         if (!found) return null;
+        if (data.phoneNumber && data.phoneNumber !== found.phoneNumber) {
+          for (const u of this.users.values()) {
+            if (u.id !== where.id && u.phoneNumber === data.phoneNumber) {
+              throw Object.assign(new Error('Unique constraint failed on phoneNumber'), {
+                code: 'P2002',
+              });
+            }
+          }
+        }
         const updated = { ...found, ...data, updatedAt: new Date() };
         this.users.set(where.id, updated);
         return updated;
@@ -362,6 +389,59 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  // ---------- PhoneVerification (Phase 1 phone OTP) ----------
+  get phoneVerification() {
+    return {
+      create: async ({ data }: any) => {
+        const id = `pv_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const rec = { id, attempts: 0, isUsed: false, createdAt: new Date(), ...data };
+        this.phoneVerifications.set(data.otpHash, rec);
+        return rec;
+      },
+      findUnique: async ({ where }: any) => {
+        if (where.otpHash) return this.phoneVerifications.get(where.otpHash) || null;
+        for (const v of this.phoneVerifications.values()) if (v.id === where.id) return v;
+        return null;
+      },
+      findFirst: async ({ where, orderBy }: any = {}) => {
+        let arr = Array.from(this.phoneVerifications.values());
+        if (where?.phoneNumber) arr = arr.filter((v: any) => v.phoneNumber === where.phoneNumber);
+        if (where?.userId) arr = arr.filter((v: any) => v.userId === where.userId);
+        if (where?.isUsed !== undefined) arr = arr.filter((v: any) => v.isUsed === where.isUsed);
+        if (orderBy?.createdAt === 'desc')
+          arr = arr.sort((a: any, b: any) => b.createdAt.getTime() - a.createdAt.getTime());
+        return arr[0] || null;
+      },
+      findMany: async ({ where }: any = {}) => {
+        let arr = Array.from(this.phoneVerifications.values());
+        if (where?.phoneNumber) arr = arr.filter((v: any) => v.phoneNumber === where.phoneNumber);
+        if (where?.userId) arr = arr.filter((v: any) => v.userId === where.userId);
+        return arr;
+      },
+      update: async ({ where, data }: any) => {
+        for (const [k, v] of this.phoneVerifications.entries()) {
+          if (v.id === where.id || k === where.otpHash) {
+            const updated = { ...v, ...data };
+            this.phoneVerifications.set(k, updated);
+            return updated;
+          }
+        }
+        return null;
+      },
+      updateMany: async ({ where, data }: any) => {
+        let count = 0;
+        for (const [k, v] of this.phoneVerifications.entries()) {
+          if (where?.phoneNumber && v.phoneNumber !== where.phoneNumber) continue;
+          if (where?.userId && v.userId !== where.userId) continue;
+          if (where?.isUsed !== undefined && v.isUsed !== where.isUsed) continue;
+          this.phoneVerifications.set(k, { ...v, ...data });
+          count++;
+        }
+        return { count };
+      },
+    };
+  }
+
   // ---------- DeviceSession ----------
   get deviceSession() {
     return {
@@ -529,40 +609,80 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  // ---------- Hackathon ----------
+  // ---------- Hackathon (canonical read-model) ----------
+  // Same hackathonId/slug as organizer; status enum (not boolean) + discovery windows.
+  // isPublished kept as derived compat (status !== DRAFT/REVIEW/CONFIRMED).
   get hackathon() {
+    const applyWhere = (all: any[], where?: any) => {
+      let filtered = all;
+      if (!where) return filtered;
+      if (where?.isPublished !== undefined)
+        filtered = filtered.filter(
+          (h: any) => h.isPublished === where.isPublished,
+        );
+      if (where?.status !== undefined) {
+        if (typeof where.status === 'string')
+          filtered = filtered.filter((h: any) => h.status === where.status);
+        else if (where.status?.in)
+          filtered = filtered.filter((h: any) =>
+            where.status.in.includes(h.status),
+          );
+      }
+      if (where?.mode !== undefined)
+        filtered = filtered.filter((h: any) => h.mode === where.mode);
+      if (where?.slug !== undefined)
+        filtered = filtered.filter((h: any) => h.slug === where.slug);
+      if (where?.id !== undefined && typeof where.id === 'string')
+        filtered = filtered.filter((h: any) => h.id === where.id);
+      return filtered;
+    };
     return {
       findFirst: async (args?: any) => {
         const all = Array.from(this.hackathons.values());
         if (all.length === 0) return null;
-        // filter isPublished if requested
-        let filtered = all;
-        if (args?.where?.isPublished !== undefined)
-          filtered = filtered.filter(
-            (h: any) => h.isPublished === args.where.isPublished,
-          );
+        let filtered = applyWhere(all, args?.where);
         if (filtered.length === 0) return null;
         if (args?.orderBy?.createdAt === 'desc') {
           return filtered.sort(
-            (a: any, b: any) => b.createdAt.getTime() - a.createdAt.getTime(),
+            (a: any, b: any) =>
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
           )[0];
         }
         return filtered[0];
       },
       findMany: async (args?: any) => {
         let all = Array.from(this.hackathons.values());
-        if (args?.where?.isPublished !== undefined)
-          all = all.filter(
-            (h: any) => h.isPublished === args.where.isPublished,
+        all = applyWhere(all, args?.where);
+        if (args?.orderBy?.createdAt === 'desc') {
+          all = [...all].sort(
+            (a: any, b: any) =>
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
           );
+        }
+        // Pagination support (skip/take) for discovery.
+        if (typeof args?.skip === 'number') all = all.slice(args.skip);
+        if (typeof args?.take === 'number') all = all.slice(0, args.take);
+        if (args?.include?.announcements) {
+          return all.map((h: any) => ({
+            ...h,
+            announcements: Array.from(this.announcements.values()).filter(
+              (a: any) => a.hackathonId === h.id && a.isPublished,
+            ),
+          }));
+        }
         return all;
       },
       findUnique: async ({ where, include }: any) => {
-        const h = this.hackathons.get(where.id) || null;
+        let h: any = null;
+        if (where?.id) h = this.hackathons.get(where.id) || null;
+        if (!h && where?.slug) {
+          for (const v of this.hackathons.values())
+            if (v.slug === where.slug) h = v;
+        }
         if (!h) return null;
         if (include?.announcements) {
           const anns = Array.from(this.announcements.values()).filter(
-            (a: any) => a.hackathonId === where.id && a.isPublished,
+            (a: any) => a.hackathonId === h.id && a.isPublished,
           );
           return { ...h, announcements: anns };
         }
@@ -571,23 +691,41 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
       create: async ({ data, include }: any) => {
         const id =
           data.id ||
+          data.hackathonId ||
           `hack_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const status = data.status ?? (data.isPublished === false ? 'DRAFT' : 'PUBLISHED');
         const record = {
+          ...data,
           id,
+          slug: data.slug ?? id,
           title: data.title,
           description: data.description,
+          mode: data.mode ?? 'ONLINE',
+          status,
+          isPublished: status === 'PUBLISHED' || status === 'ARCHIVED' ? true : (data.isPublished ?? true),
+          hackathonType: data.hackathonType ?? 'OPEN_INNOVATION',
+          organizer: data.organizer ?? data.organizerName ?? null,
+          organizerName: data.organizerName ?? data.organizer ?? null,
           problemStatement: data.problemStatement,
           rules: data.rules ?? [],
           resources: data.resources ?? [],
           judgingCriteria: data.judgingCriteria ?? [],
           phases: data.phases ?? [],
-          startDate: data.startDate ?? new Date(),
-          endDate: data.endDate ?? new Date(Date.now() + 86400000 * 3),
-          isPublished: data.isPublished ?? true,
+          themes: data.themes ?? (data.theme ? [data.theme] : []),
+          category: data.category ?? (data.theme ?? null),
+          tags: data.tags ?? [],
+          eligibility: data.eligibility ?? [],
+          teamSize: data.teamSize ?? null,
+          registrationStart: data.registrationStart ?? null,
+          registrationEnd: data.registrationEnd ?? null,
+          eventStart: data.eventStart ?? data.startDate ?? null,
+          eventEnd: data.eventEnd ?? data.endDate ?? null,
+          startDate: data.startDate ?? data.eventStart ?? new Date(),
+          endDate: data.endDate ?? data.eventEnd ?? new Date(Date.now() + 86400000 * 3),
+          publishedAt: data.publishedAt ?? new Date(),
           announcements: [],
           createdAt: new Date(),
           updatedAt: new Date(),
-          ...data,
         };
         this.hackathons.set(id, record);
         // handle nested announcements create
@@ -619,8 +757,66 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         const h = this.hackathons.get(where.id);
         if (!h) return null;
         const updated = { ...h, ...data, updatedAt: new Date() };
+        if (data.status && updated.isPublished === undefined) {
+          updated.isPublished = ['PUBLISHED', 'ARCHIVED'].includes(data.status);
+        }
         this.hackathons.set(where.id, updated);
         return updated;
+      },
+      // Idempotent upsert by canonical hackathonId/slug (organizer → participant sync).
+      upsert: async ({ where, update, create }: any) => {
+        const id = where?.id ?? create?.id ?? create?.hackathonId;
+        const existing = id ? this.hackathons.get(id) : null;
+        if (existing) {
+          const updated = { ...existing, ...update, updatedAt: new Date() };
+          this.hackathons.set(id, updated);
+          return updated;
+        }
+        // @ts-ignore delegate to create
+        return (this as any).hackathon.create({ data: create });
+      },
+    };
+  }
+
+  // ---------- Hackathon registrations (Discover → Details → Register) ----------
+  get registration() {
+    return {
+      findMany: async ({ where }: any = {}) => {
+        let arr = Array.from(this.registrations.values());
+        if (where?.userId) arr = arr.filter((r: any) => r.userId === where.userId);
+        if (where?.hackathonId) arr = arr.filter((r: any) => r.hackathonId === where.hackathonId);
+        if (where?.status) arr = arr.filter((r: any) => r.status === where.status);
+        return arr;
+      },
+      findFirst: async ({ where }: any = {}) => {
+        for (const r of this.registrations.values()) {
+          if (where?.userId && r.userId !== where.userId) continue;
+          if (where?.hackathonId && r.hackathonId !== where.hackathonId) continue;
+          return r;
+        }
+        return null;
+      },
+      create: async ({ data }: any) => {
+        const id = data.id ?? `reg_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const record = {
+          status: 'REGISTERED',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          ...data,
+          id,
+        };
+        this.registrations.set(id, record);
+        return record;
+      },
+    };
+  }
+
+  get consumedEvent() {
+    return {
+      findUnique: async ({ where }: any) => this.consumedEvents.get(where.eventId) || null,
+      create: async ({ data }: any) => {
+        this.consumedEvents.set(data.eventId, { ...data, consumedAt: new Date() });
+        return data;
       },
     };
   }

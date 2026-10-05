@@ -20,6 +20,10 @@ export class MemoryStore {
   // Core maps
   users = new Map<string, any>();
   sessions = new Map<string, any>(); // sessionId -> { tokenHash etc }
+  // Phase 1 phone OTP: otpHash -> { id, userId, phoneNumber, otpHash, expiresAt, attempts, isUsed }
+  phoneVerifications = new Map<string, any>();
+  // OTP resend cooldown: sha256(phoneNumber) -> cooldown expiry epoch ms
+  otpCooldowns = new Map<string, number>();
 
   hackathons = new Map<string, Hackathon>();
   themes = new Map<string, Theme>();
@@ -32,6 +36,10 @@ export class MemoryStore {
   auditLogs = new Map<string, AuditLogEntry>();
   publishedEvents = new Map<string, HackathonPublishedEvent>(); // hackathonId -> latest event; also store by eventId
   publishedEventsById = new Map<string, HackathonPublishedEvent>();
+  // Outbox for organizer → participant sync (canonical transport).
+  // Publish appends here; participant consumer drains via GET /sync/outbox or /sync/published.
+  // Future: Postgres outbox + Redis Streams; in-memory keeps same contract.
+  outbox: Array<{ eventId: string; type: string; hackathonId: string; occurredAt: string; payload: unknown }> = [];
 
   // Simulated participant/team/project for analytics & participant views
   // These are intentionally shallow to respect privacy boundaries.
@@ -48,6 +56,8 @@ export class MemoryStore {
   clear() {
     this.users.clear();
     this.sessions.clear();
+    this.phoneVerifications.clear();
+    this.otpCooldowns.clear();
     this.hackathons.clear();
     this.themes.clear();
     this.resources.clear();
@@ -58,6 +68,7 @@ export class MemoryStore {
     this.auditLogs.clear();
     this.publishedEvents.clear();
     this.publishedEventsById.clear();
+    this.outbox = [];
     this.participants.clear();
     this.teams.clear();
     this.projects.clear();
@@ -73,10 +84,12 @@ export class MemoryStore {
 
   // Hackathon state transition validation
   canTransition(from: HackathonStatus, to: HackathonStatus): boolean {
+    // Keep in sync with HackathonService.allowedTransitions: archive is
+    // terminal and reachable ONLY from PUBLISHED.
     const allowed: Record<HackathonStatus, HackathonStatus[]> = {
-      DRAFT: ['REVIEW', 'ARCHIVED'],
-      REVIEW: ['DRAFT', 'CONFIRMED', 'ARCHIVED'],
-      CONFIRMED: ['PUBLISHED', 'REVIEW', 'ARCHIVED'],
+      DRAFT: ['REVIEW'],
+      REVIEW: ['DRAFT', 'CONFIRMED'],
+      CONFIRMED: ['PUBLISHED', 'REVIEW'],
       PUBLISHED: ['ARCHIVED'],
       ARCHIVED: [], // terminal
     };
@@ -117,7 +130,9 @@ export class MemoryStore {
       const curEnd = new Date(sorted[i].endsAt).getTime();
       const nextStart = new Date(sorted[i + 1].startsAt).getTime();
       if (curEnd > nextStart) {
-        return { valid: false, error: `Phases overlap between order ${sorted[i].order} and ${sorted[i + 1].order}` };
+        // Include the actual conflicting ranges so a rejection is self-diagnosing:
+        // it shows stored data, which may differ from what the form displayed.
+        return { valid: false, error: `Phases overlap between order ${sorted[i].order} (ends ${sorted[i].endsAt}) and ${sorted[i + 1].order} (starts ${sorted[i + 1].startsAt})` };
       }
       // also ensure order sequential
       if (sorted[i + 1].order !== sorted[i].order + 1) {

@@ -45,6 +45,8 @@ export default function ParticipantDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [repoStatus, setRepoStatus] = useState<{ hasAccess: boolean; status?: string } | null>(null);
+  const [aiAccess, setAiAccess] = useState<any>(null);
+  const [registration, setRegistration] = useState<any>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -57,8 +59,16 @@ export default function ParticipantDashboard() {
           hmtBackendService.getMyProject(),
         ]);
         if (!mounted) return;
-        if (h.status === 'fulfilled') setHackathon(h.value as any);
-        else setHackathon(null);
+        const hv = h.status === 'fulfilled' ? (h.value as any) : null;
+        setHackathon(hv);
+        // Registration + AI availability (backend-derived, operational home only).
+        if (hv?.id) {
+          hmtBackendService.getMyRegistrations().then((regs:any)=>{
+            const list = Array.isArray(regs)?regs:(regs?.data??[]);
+            if(mounted) setRegistration(list.find((r:any)=>r.hackathonId===hv.id) ?? null);
+          }).catch(()=>null);
+          hmtBackendService.getAiAccessStatus().then(r=>{ if(mounted) setAiAccess(r); }).catch(()=>null);
+        }
 
         if (t.status === 'fulfilled') {
           const teamData = (t.value as any)?.team ?? t.value;
@@ -103,17 +113,28 @@ export default function ParticipantDashboard() {
 
   return (
     <div className="space-y-8">
-      {/* Header */}
+      {/* Header — operational home: what do I need to do right now? */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Participant workspace</div>
+          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Home — what needs you now</div>
           <h1 className="mt-2 text-3xl font-bold tracking-[-.05em] text-[#171a2d] sm:text-[36px]">Your hackathon, in motion.</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#77798a]">Track phase, team, project and AI guidance in one premium command center. Everything stays permission-aware and read-only where it should.</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#77798a]">
+            {hackathon
+              ? `${hackathon.derivedStatus ?? 'Published'} · ${registration ? 'Registered' : 'Not registered yet'} · ${hasTeam ? 'In a team' : 'No team yet'} · AI ${aiAccess?.allowed ? 'available' : 'locked'}`
+              : 'Discover a published hackathon to begin.'}
+          </p>
         </div>
         <div className="flex gap-2">
-          <Link href="/participant/ai" className="inline-flex items-center gap-2 rounded-xl bg-[#171a2d] px-4 py-3 text-sm font-bold text-white hover:bg-[#252941]"><Sparkles size={16}/> Ask AI teammate <ArrowRight size={14}/></Link>
+          <Link href="/participant/hackathons" className="inline-flex items-center gap-2 rounded-xl border border-[#dedbd1] px-4 py-3 text-sm font-bold hover:bg-[#f4f1e8]">Discover</Link>
+          <Link href="/participant/ai" className="inline-flex items-center gap-2 rounded-xl bg-[#171a2d] px-4 py-3 text-sm font-bold text-white hover:bg-[#252941]"><Sparkles size={16}/> {aiAccess?.allowed ? 'Ask AI teammate' : 'AI locked'} <ArrowRight size={14}/></Link>
         </div>
       </div>
+      {hackathon && !registration && (
+        <div className="rounded-2xl border border-[#f26a4f]/30 bg-[#fff7ea] p-4 text-sm"><b>Next action:</b> register for {hackathon.title} — your skill profile is reused, no repeated forms. <Link href="/participant/hackathons" className="underline font-bold">Open Discover → Register</Link></div>
+      )}
+      {hackathon && aiAccess && !aiAccess.allowed && (
+        <div className="rounded-2xl border border-[#dedbd1] bg-[#f4f1e8] p-4 text-xs text-[#55586a]">AI Teammate: <b>{aiAccess.code === 'HACKATHON_NOT_LIVE' ? `locked (${aiAccess.derivedStatus})` : aiAccess.message}</b> — backend enforced, available only in the live window.</div>
+      )}
 
       {/* Current hackathon hero */}
       {hackathon ? (
@@ -121,9 +142,10 @@ export default function ParticipantDashboard() {
           <div className="grid lg:grid-cols-[1.35fr_.75fr]">
             <div className="p-6 sm:p-8">
               <div className="flex items-center gap-2">
-                <Badge tone="lime">{hackathon.isPublished ? 'PUBLISHED' : 'LIVE'}</Badge>
+                <Badge tone="lime">{hackathon.derivedStatus ?? (hackathon.isPublished ? 'PUBLISHED' : 'LIVE')}</Badge>
                 {phase && <Badge tone="dark">{phase.name || phase.status}</Badge>}
                 {daysLeft !== null && <span className="font-mono text-xs text-[#77798a]">{daysLeft}d remaining</span>}
+                {registration && <Badge tone="blue">Registered</Badge>}
               </div>
               <h2 className="mt-4 text-2xl font-bold tracking-[-.04em] text-[#171a2d]">{hackathon.title || hackathon.name || 'HMT Hackathon'}</h2>
               <p className="mt-2 text-sm leading-6 text-[#77798a] line-clamp-3">{hackathon.description || 'Build enterprise-grade AI applications and autonomous agents.'}</p>

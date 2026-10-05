@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { AuthService } from './auth.service';
-import { registerSchema, loginSchema, refreshSchema } from './auth.schemas';
+import { registerSchema, loginSchema, refreshSchema, requestPhoneOtpSchema, verifyPhoneSchema } from './auth.schemas';
 import { createAuthGuard, getUser } from '../../shared/guards/auth.guard';
 import type { JwtConfig } from '@hmt/security';
 
@@ -45,6 +45,31 @@ export async function authRoutes(app: FastifyInstance, opts: { jwtConfig: JwtCon
     const user = getUser(req as any);
     const me = await service.getMe(user.id);
     return reply.send(me);
+  });
+
+  // Phase 1 phone identity (same contract as participant-api).
+  app.post('/auth/phone/request-otp', { preHandler: [authGuard] }, async (req, reply) => {
+    const parsed = requestPhoneOtpSchema.safeParse(req.body);
+    if (!parsed.success) return reply.status(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid payload', details: parsed.error.issues } });
+    try {
+      const user = getUser(req as any);
+      const res = await service.requestPhoneOtp(user.id, parsed.data.phoneNumber);
+      return reply.send(res);
+    } catch (e: any) {
+      return reply.status(e.statusCode ?? 500).send({ error: { code: 'PHONE_OTP_FAILED', message: e.message } });
+    }
+  });
+
+  app.post('/auth/phone/verify', { preHandler: [authGuard] }, async (req, reply) => {
+    const parsed = verifyPhoneSchema.safeParse(req.body);
+    if (!parsed.success) return reply.status(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid payload', details: parsed.error.issues } });
+    try {
+      const user = getUser(req as any);
+      const res = await service.verifyPhone(user.id, parsed.data.phoneNumber, parsed.data.otp);
+      return reply.send(res);
+    } catch (e: any) {
+      return reply.status(e.statusCode ?? 500).send({ error: { code: 'PHONE_VERIFY_FAILED', message: e.message } });
+    }
   });
 
   app.post('/auth/logout', { preHandler: [authGuard] }, async (req, reply) => {

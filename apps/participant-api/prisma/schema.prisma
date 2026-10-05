@@ -85,6 +85,10 @@ model User {
   fullName        String
   role            Role           @default(PARTICIPANT)
   isEmailVerified Boolean        @default(false)
+  // Phase 1 phone identity: ONE verified phone number = ONE participant identity.
+  // Nullable so pre-existing rows need no backfill; uniqueness enforced at DB level.
+  phoneNumber     String?        @unique
+  isPhoneVerified Boolean        @default(false)
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
@@ -95,6 +99,7 @@ model User {
   auditLogs            AuditLog[]
   emailVerifications   EmailVerificationToken[]
   passwordResets       PasswordResetToken[]
+  phoneVerifications   PhoneVerification[]
   sessions             DeviceSession[]
   githubConnection     GitHubConnection?
   aiInteractions       AIInteraction[]
@@ -167,6 +172,25 @@ model PasswordResetToken {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("password_reset_tokens")
+}
+
+// Phase 1 phone OTP: short-lived numeric codes, SHA256-hashed at rest
+// (same convention as EmailVerificationToken/PasswordResetToken).
+model PhoneVerification {
+  id          String   @id @default(uuid())
+  userId      String?
+  phoneNumber String
+  otpHash     String   @unique
+  expiresAt   DateTime
+  attempts    Int      @default(0)
+  isUsed      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([phoneNumber])
+  @@index([userId])
+  @@map("phone_verifications")
 }
 
 model DeviceSession {

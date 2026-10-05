@@ -25,6 +25,7 @@ import {
 import { ParticipantTargetedRetrievalService } from '../repository/targeted-retrieval.service';
 import { AuditService } from '../audit/audit.service';
 import { AIInteractionPersistenceService } from './ai-interaction-persistence.service';
+import { AiAccessService } from './ai-access.service';
 
 @ApiTags('ai')
 @ApiBearerAuth()
@@ -38,6 +39,7 @@ export class AIController {
     private readonly targetedRetrieval: ParticipantTargetedRetrievalService,
     @Optional() private readonly auditService?: AuditService,
     @Optional() private readonly aiInteractionPersistence?: AIInteractionPersistenceService,
+    @Optional() private readonly aiAccess?: AiAccessService,
   ) {}
 
   private async checkRepositoryAccess(
@@ -192,10 +194,32 @@ export class AIController {
     };
   }
 
+  @Get('access-status')
+  async accessStatus(@Req() req: any) {
+    if (!this.aiAccess) return { allowed: false, code: 'NO_SERVICE' };
+    // Query ?projectId= supported via req.query when present.
+    const projectId = (req.query?.projectId as string) || undefined;
+    return this.aiAccess.checkAccess(req.user.id, projectId);
+  }
+
   @Post('chat')
   async chatWithTeammate(@Req() req: any, @Body() dto: AIChatDto) {
     const started = Date.now();
     const projectId = dto.projectId || null;
+    // Backend live-window enforcement (never frontend-only).
+    if (this.aiAccess) {
+      const access = await this.aiAccess.checkAccess(req.user.id, projectId || undefined);
+      if (!access.allowed) {
+        throw new ForbiddenException({
+          code: access.code,
+          message: access.message,
+          derivedStatus: access.derivedStatus,
+          hackathonId: access.hackathonId,
+          eventStart: access.eventStart,
+          eventEnd: access.eventEnd,
+        } as any);
+      }
+    }
     let aiContext: any = null;
 
     if (projectId) {
@@ -344,6 +368,17 @@ export class AIController {
     @Req() req: any,
     @Body() dto: CreateConversationDto,
   ) {
+    if (this.aiAccess) {
+      const access = await this.aiAccess.checkAccess(req.user.id, dto.projectId);
+      if (!access.allowed) {
+        throw new ForbiddenException({
+          code: access.code,
+          message: access.message,
+          derivedStatus: access.derivedStatus,
+          hackathonId: access.hackathonId,
+        } as any);
+      }
+    }
     const started = Date.now();
     const projectId = dto.projectId;
     if (projectId) {
@@ -468,6 +503,17 @@ export class AIController {
     @Param('id') id: string,
     @Body() dto: AIChatDto,
   ) {
+    if (this.aiAccess) {
+      const access = await this.aiAccess.checkAccess(req.user.id, dto.projectId);
+      if (!access.allowed) {
+        throw new ForbiddenException({
+          code: access.code,
+          message: access.message,
+          derivedStatus: access.derivedStatus,
+          hackathonId: access.hackathonId,
+        } as any);
+      }
+    }
     const started = Date.now();
     const conv = await this.prisma.aiConversation.findUnique({
       where: { id },
@@ -536,6 +582,17 @@ export class AIController {
   // ---------- AI Analysis Job Contract ----------
   @Post('analysis-jobs')
   async createAnalysisJob(@Req() req: any, @Body() dto: CreateAnalysisJobDto) {
+    if (this.aiAccess) {
+      const access = await this.aiAccess.checkAccess(req.user.id, dto.projectId);
+      if (!access.allowed) {
+        throw new ForbiddenException({
+          code: access.code,
+          message: access.message,
+          derivedStatus: access.derivedStatus,
+          hackathonId: access.hackathonId,
+        } as any);
+      }
+    }
     const project = await this.prisma.project.findUnique({
       where: { id: dto.projectId },
     } as any);
@@ -678,12 +735,15 @@ export class AIController {
   }
 
   @Get('analysis-jobs')
-  async listAnalysisJobs(@Req() req: any, @Body() dto: any) {
+  async listAnalysisJobs(@Req() req: any) {
     const membership = await this.prisma.teamMember.findFirst({
       where: { userId: req.user.id },
       include: { team: { include: { project: true } } },
     } as any);
     if (!membership?.team?.project) return { jobs: [] };
+    // Post-revocation: do not enumerate jobs generated pre-revoke without an active grant.
+    const hasGrant = await this.checkRepositoryAccess(membership.team.project.id, req.user.id);
+    if (!hasGrant) return { jobs: [] };
     const jobs = await this.prisma.aiAnalysisJob.findMany({
       where: { projectId: membership.team.project.id },
       orderBy: { createdAt: 'desc' },
@@ -727,6 +787,8 @@ export class AIController {
       include: { team: { include: { project: true } } },
     } as any);
     if (!membership?.team?.project) return { recommendations: [] };
+    const hasGrant = await this.checkRepositoryAccess(membership.team.project.id, req.user.id);
+    if (!hasGrant) return { recommendations: [] };
     const recs = await this.prisma.aiRecommendation.findMany({
       where: { projectId: membership.team.project.id },
     } as any);

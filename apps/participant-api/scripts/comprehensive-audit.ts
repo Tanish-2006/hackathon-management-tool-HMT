@@ -58,6 +58,7 @@ async function runComprehensiveAudit() {
       email,
       password,
       fullName: 'Audit Tester',
+      phoneNumber: '+14155550199',
     });
     console.log(` -> POST /auth/register [${reg.status}]:`, reg.body.user.email);
 

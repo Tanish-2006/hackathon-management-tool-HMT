@@ -35,12 +35,42 @@ const EXTENDED_DRAFT_KEYS = [
   'openInnovation',
   'problemStatements',
   'theme',
+  'participation',
 ] as const;
+
+// Server-side cross-field validation for Step 8 participation config.
+// Shape-level checks live in updateSchema (zod); this enforces the rules
+// zod cannot express across fields. Returns an error message or null.
+function validateParticipationConfig(cfg: Record<string, unknown>): string | null {
+  const mode = cfg.mode as string | undefined;
+  if (mode !== undefined && !['INDIVIDUAL', 'TEAMS', 'BOTH'].includes(mode)) {
+    return 'Invalid participation mode';
+  }
+  const teamSize = cfg.teamSize as { min?: unknown; max?: unknown } | null | undefined;
+  if (mode === 'INDIVIDUAL') {
+    if (teamSize !== undefined && teamSize !== null) return 'Team size must not be set for individual-only participation';
+  } else if (mode !== undefined) {
+    if (teamSize === undefined || teamSize === null) return 'Team size is required when teams are enabled';
+    const min = (teamSize as any)?.min;
+    const max = (teamSize as any)?.max;
+    if (!Number.isInteger(min) || min < 1) return 'Minimum team size must be >= 1';
+    if (!Number.isInteger(max) || (max as number) < (min as number)) {
+      return 'Maximum team size must be >= minimum team size';
+    }
+  } else if (teamSize !== undefined && teamSize !== null) {
+    const min = (teamSize as any)?.min;
+    const max = (teamSize as any)?.max;
+    if (!Number.isInteger(min) || (min as number) < 1) return 'Minimum team size must be >= 1';
+    if (!Number.isInteger(max) || (max as number) < (min as number)) {
+      return 'Maximum team size must be >= minimum team size';
+    }
+  }
+  return null;
+}
 
 export class HackathonService {
   private draftGenerator = DraftGeneratorFactory.create('mock');
   private customGeneratorSet = false;
-
   // Allow injecting custom generator for provider-agnostic testing
   setDraftGenerator(generator: any) {
     this.draftGenerator = generator;
@@ -642,6 +672,14 @@ export class HackathonService {
     if (!['DRAFT', 'REVIEW'].includes(hackathon.status)) {
       throw Object.assign(new Error(`Cannot edit hackathon in status ${hackathon.status}. Only DRAFT/REVIEW editable.`), { statusCode: 400 });
     }
+    // Validate Step 8 participation config (merged over stored config for partial PATCH).
+    if ((updates as any).participation !== undefined && (updates as any).participation !== null) {
+      const prevMeta = (hackathon.metadata ?? {}) as Record<string, unknown>;
+      const prevDraft = (prevMeta.draft ?? {}) as Record<string, unknown>;
+      const merged = { ...((prevDraft.participation ?? {}) as Record<string, unknown>), ...((updates as any).participation as Record<string, unknown>) };
+      const problem = validateParticipationConfig(merged);
+      if (problem) throw Object.assign(new Error(problem), { statusCode: 400 });
+    }
 
     // Validate timeline if phases being updated externally - not here, handled via timeline service
     // Apply updates (prevent status direct manipulation via update)
@@ -765,10 +803,12 @@ export class HackathonService {
   }
 
   private allowedTransitions(from: HackathonStatus): HackathonStatus[] {
+    // Archive is terminal and reachable ONLY from PUBLISHED. Non-published
+    // states can never archive directly (prevents accidental archival).
     const map: Record<HackathonStatus, HackathonStatus[]> = {
-      DRAFT: ['REVIEW', 'ARCHIVED'],
-      REVIEW: ['DRAFT', 'CONFIRMED', 'ARCHIVED'],
-      CONFIRMED: ['PUBLISHED', 'REVIEW', 'ARCHIVED'],
+      DRAFT: ['REVIEW'],
+      REVIEW: ['DRAFT', 'CONFIRMED'],
+      CONFIRMED: ['PUBLISHED', 'REVIEW'],
       PUBLISHED: ['ARCHIVED'],
       ARCHIVED: [],
     };
@@ -784,6 +824,11 @@ export class HackathonService {
     // Ensure at least one evaluation criteria
     const criteria = Array.from(memoryStore.evaluationCriteria.values()).filter((c) => c.hackathonId === hackathon.id);
     if (criteria.length === 0) return { valid: false, error: 'At least one evaluation criteria required' };
+    // Weights must total exactly 100% before confirmation (epsilon for float math).
+    const weightSum = criteria.reduce((s, c) => s + (Number(c.weight) || 0), 0);
+    if (Math.abs(weightSum - 1) > 0.001) {
+      return { valid: false, error: `Evaluation weights must total 100% (currently ${Math.round(weightSum * 100)}%)` };
+    }
     // Ensure timeline valid
     const phases = Array.from(memoryStore.phases.values()).filter((p) => p.hackathonId === hackathon.id);
     if (phases.length === 0) return { valid: false, error: 'At least one phase required' };
@@ -805,7 +850,7 @@ export class HackathonService {
     const phases = Array.from(memoryStore.phases.values())
       .filter((p) => p.hackathonId === hackathon.id)
       .sort((a, b) => a.order - b.order)
-      .map((p) => ({ phaseId: p.id, name: p.name, startsAt: p.startsAt, endsAt: p.endsAt, order: p.order }));
+      .map((p) => ({ phaseId: p.id, name: p.name, startsAt: p.startsAt, endsAt: p.endsAt, order: p.order, status: p.status }));
     const criteria = Array.from(memoryStore.evaluationCriteria.values())
       .filter((c) => c.hackathonId === hackathon.id)
       .map((c) => ({ id: c.id, name: c.name, weight: c.weight, maxScore: c.maxScore }));
@@ -814,6 +859,23 @@ export class HackathonService {
       // Only PUBLIC and PARTICIPANT visible resources go to participant contract? For sync we include all but visibility flag controls consumption
       .map((r) => ({ id: r.id, title: r.title, type: r.type, url: r.url ?? null, visibility: r.visibility }));
     const themeNames = hackathon.themeIds.map((tid) => memoryStore.themes.get(tid)?.name ?? null).filter(Boolean).join(', ');
+
+    // Derive event windows from explicit fields, falling back to phase extremes.
+    const sortedByStart = [...phases].sort(
+      (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
+    );
+    const sortedByEnd = [...phases].sort(
+      (a, b) => new Date(a.endsAt).getTime() - new Date(b.endsAt).getTime(),
+    );
+    const meta = (hackathon.metadata ?? {}) as Record<string, unknown>;
+    const draft = (meta.draft ?? {}) as Record<string, unknown>;
+    const eligibility =
+      hackathon.eligibility ??
+      (Array.isArray(draft.eligibility) ? (draft.eligibility as string[]) : undefined) ??
+      (hackathon.audience ? [hackathon.audience] : undefined);
+    const teamSize =
+      hackathon.teamSize ??
+      ((draft.teamSize as { min: number; max: number; recommended?: number } | undefined) ?? undefined);
 
     const event: HackathonPublishedEvent = {
       eventId: randomUUID(),
@@ -842,10 +904,31 @@ export class HackathonService {
         announcements: [],
         publishedAt: hackathon.publishedAt ?? new Date().toISOString(),
         hackathonVersion: hackathon.version,
+        registrationStart: hackathon.registrationStart ?? sortedByStart[0]?.startsAt ?? null,
+        registrationEnd:
+          hackathon.registrationEnd ??
+          sortedByStart.find((p) => p.name === 'registration')?.endsAt ??
+          sortedByStart[0]?.endsAt ??
+          null,
+        eventStart: hackathon.eventStart ?? sortedByStart[0]?.startsAt ?? null,
+        eventEnd: hackathon.eventEnd ?? sortedByEnd[sortedByEnd.length - 1]?.endsAt ?? null,
+        eligibility,
+        teamSize: teamSize ?? undefined,
+        category: hackathon.category ?? (themeNames || undefined),
+        tags: hackathon.tags ?? hackathon.themeIds,
+        organizerName: hackathon.organizerName ?? undefined,
       },
     };
     memoryStore.publishedEvents.set(hackathon.id, event);
     memoryStore.publishedEventsById.set(event.eventId, event);
+    // Canonical outbox append — participant consumer drains via /sync/published or /sync/outbox.
+    memoryStore.outbox.push({
+      eventId: event.eventId,
+      type: event.type,
+      hackathonId: hackathon.id,
+      occurredAt: event.occurredAt,
+      payload: event.payload,
+    });
 
     await auditService.log({
       actorId,

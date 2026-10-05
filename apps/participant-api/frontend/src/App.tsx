@@ -11,6 +11,7 @@ import NotFound from '@/pages/not-found';
 // Agent 1: Participant routes — owned by Agent 1, shell owned by Agent 3 — please integrate
 import ParticipantDashboard from '@/pages/participant/dashboard';
 import ParticipantHackathons from '@/pages/participant/hackathons';
+import MyHackathons from '@/pages/participant/my-hackathons';
 import ParticipantTeams from '@/pages/participant/teams';
 import ParticipantProjects from '@/pages/participant/projects';
 import ParticipantAI from '@/pages/participant/ai';
@@ -44,13 +45,51 @@ function Logo({ inverse = false }: { inverse?: boolean }) {
   return <Link href="/dashboard" className="flex items-center gap-2.5" data-testid="link-logo"><span className={cn('grid h-8 w-8 place-items-center rounded-[9px] text-sm font-bold', inverse ? 'bg-[#d8e35b] text-[#171a2d]' : 'bg-[#f26a4f] text-[#fdfbf5]')}>H</span><span className="text-[17px] font-bold tracking-[-.04em]">HMT<span className={inverse ? 'text-[#d8e35b]' : 'text-[#f26a4f]'}>.</span></span></Link>;
 }
 
+// Minimal IA: every capability gets one home (Unstop/Hack2Skill pattern).
+// Participant: Home → Discover → My Hackathons → Team → Project → AI → Progress → Profile.
+// Organizer kept as separate workspace; Judge/Leaderboard/Sponsors removed from primary nav.
+const participantNav = [
+  { href: '/participant/dashboard', label: 'Home', icon: LayoutDashboard },
+  { href: '/participant/hackathons', label: 'Discover', icon: Search },
+  { href: '/participant/my-hackathons', label: 'My Hackathons', icon: Flag },
+  { href: '/participant/teams', label: 'My Team', icon: Users },
+  { href: '/participant/projects', label: 'My Project', icon: FileText },
+  { href: '/participant/ai', label: 'AI Teammate', icon: Sparkles },
+  { href: '/participant/performance', label: 'Progress', icon: BarChart3 },
+  { href: '/participant/profile', label: 'Profile', icon: Settings2 },
+];
+const organizerNav = [
+  { href: '/organizer/dashboard', label: 'Overview', icon: LayoutDashboard },
+  { href: '/organizer/hackathons', label: 'Hackathons', icon: Flag },
+  { href: '/organizer/participants', label: 'Participants', icon: Users },
+  { href: '/organizer/teams', label: 'Teams', icon: Users },
+  { href: '/organizer/evaluations', label: 'Evaluations', icon: ClipboardCheck },
+  { href: '/organizer/analytics', label: 'Analytics', icon: BarChart3 },
+];
+// Organizer workspace home: same destinations as organizerNav, but the first entry
+// is labeled Home. Participant routes are intentionally NOT included — they are
+// RequireParticipant-guarded and would strand organizers on a permission wall.
+const organizerHomeNav = [
+  { href: '/organizer/dashboard', label: 'Home', icon: LayoutDashboard },
+  ...organizerNav.slice(1),
+];
+// Mentor workspace: existing mentor routes only (organizer routes are
+// RequireOrganizer-guarded and would strand mentors on a permission wall).
+const mentorNav = [
+  { href: '/mentor/dashboard', label: 'Mentor Home', icon: LayoutDashboard },
+  { href: '/mentor/teams', label: 'Teams', icon: Users },
+  { href: '/mentor/evaluations', label: 'Evaluations', icon: ClipboardCheck },
+  { href: '/mentor/feedback', label: 'Feedback', icon: FileText },
+  { href: '/mentor/profile', label: 'Profile', icon: Settings2 },
+];
 const navItems = [
-  { href: '/dashboard', label: 'Command center', icon: LayoutDashboard },
-  { href: '/participant', label: 'My build', icon: Zap },
+  { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
+  { href: '/participant/hackathons', label: 'Discover', icon: Search },
+  { href: '/participant/my-hackathons', label: 'My Hackathons', icon: Flag },
+  { href: '/participant/teams', label: 'My Team', icon: Users },
+  { href: '/participant/projects', label: 'My Project', icon: FileText },
+  { href: '/participant/ai', label: 'AI Teammate', icon: Sparkles },
   { href: '/organizer', label: 'Organizer', icon: BarChart3 },
-  { href: '/judge', label: 'Judge panel', icon: ClipboardCheck },
-  { href: '/leaderboard', label: 'Leaderboard', icon: Trophy },
-  { href: '/sponsors', label: 'Sponsors', icon: ShieldCheck },
 ];
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -58,8 +97,16 @@ function Shell({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [notices, setNotices] = useState(false);
   const { user, logout } = useAuth();
-  // Participant navigation excludes Sponsor; every other role keeps the full menu.
-  const visibleNavItems = user?.role === 'PARTICIPANT' ? navItems.filter(n => n.href !== '/sponsors') : navItems;
+  // Role-aware minimal nav: every entry must be accessible to the shown role,
+  // otherwise the permission guard strands the user. ADMIN passes all guards,
+  // so it keeps the combined workspace; ORGANIZER/MENTOR get role-safe links only.
+  const visibleNavItems = user?.role === 'ORGANIZER'
+    ? organizerHomeNav
+    : user?.role === 'ADMIN'
+      ? [...participantNav.slice(0, 3), ...organizerNav]
+      : user?.role === 'MENTOR'
+        ? mentorNav
+        : participantNav;
   const handleLogout = async () => {
     await logout();
     setLocation('/login');
@@ -194,6 +241,11 @@ function Auth({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  // Phase 1 phone identity: required at participant registration, verified via OTP.
+  const [phone, setPhone] = useState('');
+  const [pendingPhone, setPendingPhone] = useState<string | null>(null);
+  const [pendingHint, setPendingHint] = useState<string | null>(null);
+  const [pendingKind, setPendingKind] = useState<'participant' | 'organizer'>('participant');
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -224,22 +276,42 @@ function Auth({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
       return;
     }
     const cleanEmail = email.trim();
-    if (!cleanEmail || !password || (isRegister && !name.trim())) {
+    const cleanPhone = phone.replace(/[\s\-().]/g, '');
+    // Phase 1 phone identity: required at registration for every account type
+    // (participant via participant API, organizer/mentor via organizer API).
+    const needPhone = isRegister;
+    if (!cleanEmail || !password || (isRegister && !name.trim()) || (needPhone && !cleanPhone)) {
       setErrorMsg('Please fill in all required fields.');
+      return;
+    }
+    if (needPhone && !/^\+[1-9]\d{7,14}$/.test(cleanPhone)) {
+      setErrorMsg('Enter your phone number in international format (e.g. +919876543210).');
       return;
     }
     if (password.length < 8) { setErrorMsg('Password must be at least 8 characters.'); return; }
     setErrorMsg('');
     setLoading(true);
+    // Phase 1 phone identity: newly registered participants verify their OTP before entering.
+    let justRegisteredPhone: string | null = null;
+    let justRegisteredHint: string | null = null;
+    let justRegisteredKind: 'participant' | 'organizer' = 'participant';
     try {
       if (isRegister) {
         // No cross-role leakage: participant accounts via participant API (PARTICIPANT),
         // organizer/mentor accounts via organizer API with explicit role.
         if (accountType === 'Participant') {
-          await hmtBackendService.register({ fullName: name.trim(), email: cleanEmail, password });
+          const reg: any = await hmtBackendService.register({ fullName: name.trim(), email: cleanEmail, password, phoneNumber: cleanPhone });
+          justRegisteredPhone = cleanPhone;
+          // Dev-only: backend returns the raw OTP in non-production for manual verification.
+          if (reg?.phoneOtp) justRegisteredHint = String(reg.phoneOtp);
+          justRegisteredKind = 'participant';
         } else {
           const roleStr: HmtRole = accountType === 'Mentor' ? 'MENTOR' : 'ORGANIZER';
-          await organizerApi.register({ email: cleanEmail, password, fullName: name.trim(), displayName: name.trim(), role: roleStr });
+          // Phase 1 phone identity: organizer/mentor registration collects phone (same rule).
+          const reg: any = await organizerApi.register({ email: cleanEmail, password, fullName: name.trim(), displayName: name.trim(), role: roleStr, phoneNumber: cleanPhone });
+          justRegisteredPhone = cleanPhone;
+          if (reg?.phoneOtp) justRegisteredHint = String(reg.phoneOtp);
+          justRegisteredKind = 'organizer';
         }
       } else {
         // Login: try the selected account system first, then fall back once.
@@ -263,16 +335,20 @@ function Auth({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
         }
         if (!ok) throw lastErr || new Error('Invalid email or password.');
       }
-      await refreshAuth();
+      // Verified session populates role routing — except fresh participant
+      // registrations, which must verify their phone OTP first (tokens are stored).
+      if (!justRegisteredPhone) await refreshAuth();
     } catch (err: any) {
       const status = err?.status;
-      if (status === 409) setErrorMsg('An account with this email already exists. Try signing in.');
+      if (status === 409) setErrorMsg('An account with this email or phone number already exists. Try signing in.');
       else if (status === 429) setErrorMsg('Too many attempts. Please wait a moment and try again.');
       else setErrorMsg(err?.message || 'Authentication failed. Check credentials.');
       setLoading(false);
       return;
     }
     setLoading(false);
+    // Phase 1 phone identity: hold newly registered participants on the OTP step.
+    if (justRegisteredPhone) { setPendingPhone(justRegisteredPhone); setPendingHint(justRegisteredHint); setPendingKind(justRegisteredKind); return; }
     // Route by REAL backend role (refreshAuth populated it); fall back to selected type.
     try {
       const me = await hmtBackendService.getMe().catch(() => null);
@@ -284,11 +360,72 @@ function Auth({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
       const r = (me as any)?.role ?? (me as any)?.user?.role;
       if (r === 'PARTICIPANT' || r === 'ORGANIZER' || r === 'MENTOR' || r === 'ADMIN') { setLocation(targetFor(r)); return; }
     } catch {}
-    setLocation(accountType === 'Participant' ? '/participant/dashboard' : accountType === 'Mentor' ? '/mentor/dashboard' : '/organizer/dashboard');
+    // Last resort when live role resolution fails: RoleLanding re-resolves by real
+    // backend role (or sends to /login without a session) — never guess a workspace,
+    // which previously stranded non-participants on /participant/dashboard.
+    setLocation('/dashboard');
   };
 
-  return <AuthFrame><div className="mx-auto max-w-md"><div className="mb-10 text-center"><div className="mx-auto w-fit"><Logo /></div><h1 className="mt-8 text-3xl font-bold tracking-[-.06em]">{mode === 'forgot' ? 'Reset your access.' : isRegister ? 'Make room for ideas.' : 'Welcome back, builder.'}</h1><p className="mt-2 text-sm text-[#77798a]">{mode === 'forgot' ? 'No drama. We will get you back in.' : 'Your next great weekend starts here.'}</p></div>{mode !== 'forgot' && <div className="mb-5 flex gap-2 rounded-xl bg-[#e9e5da] p-1" role="group" aria-label="Account type">{(['Participant', 'Organizer', 'Mentor'] as const).map(r => <button key={r} type="button" onClick={() => setAccountType(r)} className={cn('flex-1 rounded-lg py-2 text-[10px] font-bold', accountType === r ? 'bg-[#fdfbf5] shadow-sm' : 'text-[#77798a]')} data-testid={`button-auth-role-${r.toLowerCase()}`}>{r}</button>)}</div>}{errorMsg && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-600" role="alert">{errorMsg}</div>}<form onSubmit={handleSubmit} className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6" noValidate>{isRegister && <Field label="Full name" required><input className="hmt-input" value={name} onChange={e => setName(e.target.value)} placeholder="Your full name" required autoComplete="name" data-testid="input-full-name" /></Field>}<Field label="Email" required><input type="email" className="hmt-input" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" required autoComplete="email" data-testid="input-auth-email" /></Field>{mode !== 'forgot' && <Field label="Password" required><input type="password" minLength={8} className="hmt-input" value={password} onChange={e => setPassword(e.target.value)} placeholder="8+ characters" required autoComplete={isRegister ? 'new-password' : 'current-password'} data-testid="input-auth-password" /></Field>}<button disabled={loading} className="mt-2 w-full rounded-xl bg-[#f26a4f] px-4 py-3.5 text-sm font-bold text-[#fdfbf5] disabled:opacity-50" data-testid={`button-submit-${mode}`}>{loading ? 'Connecting...' : (mode === 'forgot' ? 'Send reset link' : isRegister ? `Create ${accountType} account` : `Sign in as ${accountType}`)}</button></form><div className="mt-4 text-center text-xs text-[#77798a]">{mode === 'login' ? <span>New here? <Link href="/register" className="font-bold text-[#f26a4f]">Create an account</Link> · <Link href="/forgot-password" className="font-bold text-[#f26a4f]">Forgot password</Link></span> : mode === 'register' ? <span>Have an account? <Link href="/login" className="font-bold text-[#f26a4f]">Sign in</Link></span> : <span><Link href="/login" className="font-bold text-[#f26a4f]">Back to sign in</Link></span>}</div></div></AuthFrame>;
+  // Phase 1 phone identity: OTP step after participant registration (no new route).
+  if (pendingPhone) {
+    return <AuthFrame><div className="mx-auto max-w-md"><div className="mb-10 text-center"><div className="mx-auto w-fit"><Logo /></div><h1 className="mt-8 text-3xl font-bold tracking-[-.06em]">Verify your number.</h1><p className="mt-2 text-sm text-[#77798a]">We sent a 6-digit code to {pendingPhone}. One verified number, one identity.</p></div><VerifyPhonePanel phone={pendingPhone} hint={pendingHint} kind={pendingKind} onVerified={() => { setPendingPhone(null); setPendingHint(null); }} /></div></AuthFrame>;
+  }
+
+  return <AuthFrame><div className="mx-auto max-w-md"><div className="mb-10 text-center"><div className="mx-auto w-fit"><Logo /></div><h1 className="mt-8 text-3xl font-bold tracking-[-.06em]">{mode === 'forgot' ? 'Reset your access.' : isRegister ? 'Make room for ideas.' : 'Welcome back, builder.'}</h1><p className="mt-2 text-sm text-[#77798a]">{mode === 'forgot' ? 'No drama. We will get you back in.' : 'Your next great weekend starts here.'}</p></div>{mode !== 'forgot' && <div className="mb-5 flex gap-2 rounded-xl bg-[#e9e5da] p-1" role="group" aria-label="Account type">{(['Participant', 'Organizer', 'Mentor'] as const).map(r => <button key={r} type="button" onClick={() => setAccountType(r)} className={cn('flex-1 rounded-lg py-2 text-[10px] font-bold', accountType === r ? 'bg-[#fdfbf5] shadow-sm' : 'text-[#77798a]')} data-testid={`button-auth-role-${r.toLowerCase()}`}>{r}</button>)}</div>}{errorMsg && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-600" role="alert">{errorMsg}</div>}<form onSubmit={handleSubmit} className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6" noValidate>{isRegister && <Field label="Full name" required><input className="hmt-input" value={name} onChange={e => setName(e.target.value)} placeholder="Your full name" required autoComplete="name" data-testid="input-full-name" /></Field>}<Field label="Email" required><input type="email" className="hmt-input" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" required autoComplete="email" data-testid="input-auth-email" /></Field>{isRegister && <Field label="Phone number" required><input type="tel" className="hmt-input" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+919876543210" required autoComplete="tel" data-testid="input-auth-phone" /></Field>}{mode !== 'forgot' && <Field label="Password" required><input type="password" minLength={8} className="hmt-input" value={password} onChange={e => setPassword(e.target.value)} placeholder="8+ characters" required autoComplete={isRegister ? 'new-password' : 'current-password'} data-testid="input-auth-password" /></Field>}<button disabled={loading} className="mt-2 w-full rounded-xl bg-[#f26a4f] px-4 py-3.5 text-sm font-bold text-[#fdfbf5] disabled:opacity-50" data-testid={`button-submit-${mode}`}>{loading ? 'Connecting...' : (mode === 'forgot' ? 'Send reset link' : isRegister ? `Create ${accountType} account` : `Sign in as ${accountType}`)}</button></form><div className="mt-4 text-center text-xs text-[#77798a]">{mode === 'login' ? <span>New here? <Link href="/register" className="font-bold text-[#f26a4f]">Create an account</Link> · <Link href="/forgot-password" className="font-bold text-[#f26a4f]">Forgot password</Link></span> : mode === 'register' ? <span>Have an account? <Link href="/login" className="font-bold text-[#f26a4f]">Sign in</Link></span> : <span><Link href="/login" className="font-bold text-[#f26a4f]">Back to sign in</Link></span>}</div></div></AuthFrame>;
 }
+// Phase 1 phone identity: OTP verification panel (plain inputs, no new dependency).
+// Rendered inline in the register flow — not a separate page/route.
+// kind selects the backend (participant API vs organizer API which also serves mentors).
+function VerifyPhonePanel({ phone, hint, kind, onVerified }: { phone: string; hint: string | null; kind: 'participant' | 'organizer'; onVerified: () => void }) {
+  const { refreshAuth } = useAuth();
+  const client = kind === 'organizer' ? organizerApi : hmtBackendService;
+  const [code, setCode] = useState('');
+  const [msg, setMsg] = useState(hint ? `Demo code (dev only): ${hint}` : '');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = code.replace(/\D/g, '');
+    if (clean.length !== 6) { setMsg('Enter the 6-digit code we sent.'); return; }
+    setMsg('');
+    setBusy(true);
+    try {
+      await client.verifyPhoneOtp(phone, clean);
+      await refreshAuth();
+      onVerified();
+    } catch (err: any) {
+      const status = err?.status;
+      if (status === 429) setMsg('Too many attempts. Wait a moment, then resend a new code.');
+      else setMsg(err?.message || 'Verification failed. Check the code and try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resend = async () => {
+    setMsg('');
+    setBusy(true);
+    try {
+      const res = await client.requestPhoneOtp(phone);
+      // Dev-only: backend returns the raw OTP in non-production for manual verification.
+      setMsg(res?.phoneOtp ? `Demo code (dev only): ${res.phoneOtp}` : 'New code sent. Check your messages.');
+    } catch (err: any) {
+      setMsg(err?.message || 'Could not resend the code. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <form onSubmit={submit} className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6" noValidate>
+    {msg && <div className="mb-4 rounded-xl border border-[#dedbd1] bg-[#f4f1e8] p-3 text-xs text-[#171a2d]" role="status">{msg}</div>}
+    <Field label="6-digit code" required>
+      <input className="hmt-input text-center text-lg font-bold tracking-[.4em]" value={code} onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="••••••" required inputMode="numeric" autoComplete="one-time-code" data-testid="input-phone-otp" />
+    </Field>
+    <button disabled={busy} className="mt-2 w-full rounded-xl bg-[#f26a4f] px-4 py-3.5 text-sm font-bold text-[#fdfbf5] disabled:opacity-50" data-testid="button-verify-phone">{busy ? 'Verifying...' : 'Verify phone number'}</button>
+    <button type="button" disabled={busy} onClick={resend} className="mt-3 w-full text-xs font-bold text-[#f26a4f] disabled:opacity-50" data-testid="button-resend-otp">Resend code</button>
+  </form>;
+}
+
 function AuthFrame({ children }: { children: React.ReactNode }) { return <div className="hmt-app flex min-h-[100dvh] items-center justify-center bg-[#f4f1e8] px-5 py-10"><div className="w-full">{children}<div className="mx-auto mt-10 max-w-md text-center font-mono-ui text-[9px] uppercase tracking-[.16em] text-[#aaa9a2]">HMT · Plan. Build. Compete. Win.</div></div></div>; }
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -342,6 +479,7 @@ function AppRoutes() { return <Switch>
 <Route path="/hackathon/:id" component={HackathonDetail} />
 <Route path="/participant/dashboard">{() => <RequireParticipant><ParticipantDashboard /></RequireParticipant>}</Route>
 <Route path="/participant/hackathons">{() => <RequireParticipant><ParticipantHackathons /></RequireParticipant>}</Route>
+<Route path="/participant/my-hackathons">{() => <RequireParticipant><MyHackathons /></RequireParticipant>}</Route>
 <Route path="/participant/teams">{() => <RequireParticipant><ParticipantTeams /></RequireParticipant>}</Route>
 <Route path="/participant/projects">{() => <RequireParticipant><ParticipantProjects /></RequireParticipant>}</Route>
 <Route path="/participant/ai">{() => <RequireParticipant><ParticipantAI /></RequireParticipant>}</Route>
