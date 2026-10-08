@@ -193,6 +193,7 @@ export interface HackathonPhase {
   order: number;
   startsAt: string;
   endsAt: string;
+  description?: string | null;
   status: 'UPCOMING' | 'ACTIVE' | 'COMPLETED';
   createdAt: string;
   updatedAt: string;

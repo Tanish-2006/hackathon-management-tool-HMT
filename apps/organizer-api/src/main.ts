@@ -60,7 +60,7 @@ async function buildApp(): Promise<FastifyInstance> {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'X-Correlation-Id'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Request-Id', 'X-Correlation-Id'],
     exposedHeaders: ['X-Request-Id'],
   });
 
@@ -314,9 +314,14 @@ async function start(): Promise<void> {
   const config = createAppConfig(env);
   const app = await buildApp();
   const port = env.ORGANIZER_API_PORT;
-  await app.listen({ port, host: '0.0.0.0' });
+  // Dual-stack bind: `localhost` resolves to ::1 first on modern systems and
+  // browsers attempt IPv6; an IPv4-only socket refuses them, which surfaces as
+  // a misleading CORS/NetworkError. '::' accepts both families (bindv6only=0).
+  await app.listen({ port, host: '::' });
   // eslint-disable-next-line no-console
   console.log(`Organizer API listening on ${port} (env=${config.nodeEnv})`);
+  // eslint-disable-next-line no-console
+  console.log(`CORS origins: ${config.corsOrigins.join(',')}`);
 }
 
 if (require.main === module) {

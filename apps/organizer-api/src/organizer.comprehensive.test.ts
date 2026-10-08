@@ -49,6 +49,18 @@ function authHeaders(token: string) {
   return { Authorization: `Bearer ${token}` };
 }
 
+// Explicit event window + AI timeline materialization (required before confirm
+// since AI drafts no longer persist dummy-dated phases).
+async function materializeWindow(app: any, hackId: string, token: string) {
+  const res = await app.inject({
+    method: 'POST',
+    url: `/api/v1/hackathons/${hackId}/timeline/materialize`,
+    payload: { eventStart: '2026-11-01T09:00:00.000Z', eventEnd: '2026-11-04T18:00:00.000Z' },
+    headers: authHeaders(token),
+  });
+  return res;
+}
+
 describe('Organizer Backend — Terminal 3 Comprehensive', () => {
   let app: any;
 
@@ -253,6 +265,9 @@ describe('Organizer Backend — Terminal 3 Comprehensive', () => {
       };
       const gen = await app.inject({ method: 'POST', url: '/api/v1/hackathons/draft/generate', payload: input, headers: authHeaders(org.accessToken) });
       let hackId = JSON.parse(gen.body).data.hackathon.id;
+      // AI drafts carry dateless phase suggestions: set the explicit event
+      // window and materialize the timeline before confirming.
+      expect((await materializeWindow(app, hackId, org.accessToken)).statusCode).toBe(201);
       // DRAFT → REVIEW
       let res = await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/review`, headers: authHeaders(org.accessToken) });
       expect(res.statusCode).toBe(200);
@@ -280,6 +295,38 @@ describe('Organizer Backend — Terminal 3 Comprehensive', () => {
       // ARCHIVED terminal - no further transitions
       res = await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/review`, headers: authHeaders(org.accessToken) });
       expect(res.statusCode).toBe(400);
+    });
+
+    it('emits a HackathonArchived outbox event on archive (participant sync channel)', async () => {
+      clearStore();
+      const org = await registerAndLogin(app, 'archsync@test.hmt', 'Str0ngPass123!', 'ORGANIZER');
+      const input = {
+        hackathonName: 'Archive Sync Hack',
+        objective: 'Test archived sync',
+        audience: 'All',
+        duration: '3 days',
+        mode: 'HYBRID',
+        themePreference: 'AI',
+        problemStatementBasedOrOpenInnovation: 'OPEN_INNOVATION',
+        expectedOutcomes: 'Demo',
+        judgingPreferences: 'Innovation',
+        resources: 'Docs',
+        rules: 'Rule 1',
+      };
+      const gen = await app.inject({ method: 'POST', url: '/api/v1/hackathons/draft/generate', payload: input, headers: authHeaders(org.accessToken) });
+      const hackId = JSON.parse(gen.body).data.hackathon.id;
+      expect((await materializeWindow(app, hackId, org.accessToken)).statusCode).toBe(201);
+      await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/review`, headers: authHeaders(org.accessToken) });
+      await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/confirm`, headers: authHeaders(org.accessToken) });
+      await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/publish`, headers: authHeaders(org.accessToken) });
+      // Push target is unset in tests, so delivery is skipped — transition still succeeds.
+      const arch = await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/archive`, headers: authHeaders(org.accessToken) });
+      expect(arch.statusCode).toBe(200);
+      const outbox = await app.inject({ method: 'GET', url: '/api/v1/sync/outbox?limit=50', headers: authHeaders(org.accessToken) });
+      const rows = JSON.parse(outbox.body).data;
+      const archived = rows.filter((r: any) => r.type === 'HackathonArchived' && r.hackathonId === hackId);
+      expect(archived.length).toBe(1);
+      expect(archived[0].payload.archivedAt).toBeDefined();
     });
 
     it('rejects archive from non-published states (archive is terminal admin action)', async () => {
@@ -651,6 +698,230 @@ describe('Organizer Backend — Terminal 3 Comprehensive', () => {
       const list = await app.inject({ method: 'GET', url: `/api/v1/hackathons/${hackId}/phases`, headers: authHeaders(org.accessToken) });
       expect(JSON.parse(list.body).data.length).toBe(8);
     });
+
+    it('materializes AI phases into the explicit window and rejects out-of-window phases', async () => {
+      clearStore();
+      const org = await registerAndLogin(app, 'materialize@test.hmt', 'Str0ngPass123!', 'ORGANIZER');
+      const input = {
+        hackathonName: 'Materialize Hack',
+        objective: 'Test materialize',
+        audience: 'All',
+        duration: '3 days',
+        mode: 'HYBRID',
+        themePreference: 'AI',
+        problemStatementBasedOrOpenInnovation: 'OPEN_INNOVATION',
+        expectedOutcomes: 'Demo',
+        judgingPreferences: 'Innovation',
+        resources: 'Docs',
+        rules: 'Rule 1',
+      };
+      const gen = await app.inject({ method: 'POST', url: '/api/v1/hackathons/draft/generate', payload: input, headers: authHeaders(org.accessToken) });
+      const hackId = JSON.parse(gen.body).data.hackathon.id;
+      // Fresh AI draft has suggestions but zero dated phases.
+      const empty = await app.inject({ method: 'GET', url: `/api/v1/hackathons/${hackId}/phases`, headers: authHeaders(org.accessToken) });
+      expect(JSON.parse(empty.body).data).toEqual([]);
+      // Invalid window rejected.
+      const badWindow = await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/timeline/materialize`, payload: { eventStart: '2026-11-04T18:00:00.000Z', eventEnd: '2026-11-01T09:00:00.000Z' }, headers: authHeaders(org.accessToken) });
+      expect(badWindow.statusCode).toBe(400);
+      // Valid 3-day window: all 7 AI phases fit inside.
+      const mat = await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/timeline/materialize`, payload: { eventStart: '2026-11-01T09:00:00.000Z', eventEnd: '2026-11-04T18:00:00.000Z' }, headers: authHeaders(org.accessToken) });
+      expect(mat.statusCode).toBe(201);
+      const phases = JSON.parse(mat.body).data.phases;
+      expect(phases).toHaveLength(7);
+      expect(phases[0].startsAt).toBe('2026-11-01T09:00:00.000Z');
+      expect(phases[6].endsAt).toBe('2026-11-04T18:00:00.000Z');
+      for (const p of phases) {
+        expect(new Date(p.startsAt).getTime()).toBeGreaterThanOrEqual(new Date('2026-11-01T09:00:00.000Z').getTime());
+        expect(new Date(p.endsAt).getTime()).toBeLessThanOrEqual(new Date('2026-11-04T18:00:00.000Z').getTime());
+      }
+      // Second materialize refused (no silent overwrite).
+      const again = await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/timeline/materialize`, payload: { eventStart: '2026-11-01T09:00:00.000Z', eventEnd: '2026-11-04T18:00:00.000Z' }, headers: authHeaders(org.accessToken) });
+      expect(again.statusCode).toBe(409);
+      // Manual phase outside the window rejected; windowless behavior untouched elsewhere.
+      const outside = await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/phases`, payload: { name: 'extra', order: 8, startsAt: '2026-12-01T00:00:00.000Z', endsAt: '2026-12-02T00:00:00.000Z' }, headers: authHeaders(org.accessToken) });
+      expect(outside.statusCode).toBe(400);
+      expect(JSON.parse(outside.body).error.message).toMatch(/before the event|after the event/i);
+    });
+  });
+
+  describe('Timeline persistence', () => {
+    it('persists created phases including description, visible on refetch', async () => {
+      clearStore();
+      const org = await registerAndLogin(app, 'persist@test.hmt', 'Str0ngPass123!', 'ORGANIZER');
+      const manual = await app.inject({ method: 'POST', url: '/api/v1/hackathons', payload: { title: 'Persist Hack', description: 'Desc' }, headers: authHeaders(org.accessToken) });
+      const hackId = JSON.parse(manual.body).data.id;
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/v1/hackathons/${hackId}/phases`,
+        payload: { name: 'registration', order: 1, startsAt: '2026-10-08T00:00:00.000Z', endsAt: '2026-10-08T08:00:00.000Z', description: 'Participants register and form initial teams.' },
+        headers: authHeaders(org.accessToken),
+      });
+      expect(created.statusCode).toBe(201);
+      const phaseId = JSON.parse(created.body).data.id;
+      const list = await app.inject({ method: 'GET', url: `/api/v1/hackathons/${hackId}/phases`, headers: authHeaders(org.accessToken) });
+      const stored = JSON.parse(list.body).data.find((p: any) => p.id === phaseId);
+      expect(stored.description).toBe('Participants register and form initial teams.');
+      expect(stored.startsAt).toBe('2026-10-08T00:00:00.000Z');
+      expect(stored.endsAt).toBe('2026-10-08T08:00:00.000Z');
+    });
+
+    it('persists phase edits (name, description, dates) on the same phase id', async () => {
+      clearStore();
+      const org = await registerAndLogin(app, 'persistedit@test.hmt', 'Str0ngPass123!', 'ORGANIZER');
+      const manual = await app.inject({ method: 'POST', url: '/api/v1/hackathons', payload: { title: 'Edit Hack', description: 'Desc' }, headers: authHeaders(org.accessToken) });
+      const hackId = JSON.parse(manual.body).data.id;
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/v1/hackathons/${hackId}/phases`,
+        payload: { name: 'registration', order: 1, startsAt: '2026-10-08T00:00:00.000Z', endsAt: '2026-10-08T08:00:00.000Z', description: 'Old.' },
+        headers: authHeaders(org.accessToken),
+      });
+      const phaseId = JSON.parse(created.body).data.id;
+      const updated = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/phases/${phaseId}`,
+        payload: { name: 'Registration', description: 'Participants register and finalize their initial team.', startsAt: '2026-10-09T00:00:00.000Z', endsAt: '2026-10-09T08:00:00.000Z' },
+        headers: authHeaders(org.accessToken),
+      });
+      expect(updated.statusCode).toBe(200);
+      const body = JSON.parse(updated.body).data;
+      expect(body.id).toBe(phaseId);
+      expect(body.name).toBe('Registration');
+      expect(body.description).toBe('Participants register and finalize their initial team.');
+      expect(body.startsAt).toBe('2026-10-09T00:00:00.000Z');
+      const list = await app.inject({ method: 'GET', url: `/api/v1/hackathons/${hackId}/phases`, headers: authHeaders(org.accessToken) });
+      expect(JSON.parse(list.body).data.length).toBe(1);
+    });
+
+    it('does not self-overlap when editing a phase without changing dates', async () => {
+      clearStore();
+      const org = await registerAndLogin(app, 'selfoverlap@test.hmt', 'Str0ngPass123!', 'ORGANIZER');
+      const manual = await app.inject({ method: 'POST', url: '/api/v1/hackathons', payload: { title: 'Self Hack', description: 'Desc' }, headers: authHeaders(org.accessToken) });
+      const hackId = JSON.parse(manual.body).data.id;
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/v1/hackathons/${hackId}/phases`,
+        payload: { name: 'registration', order: 1, startsAt: '2026-10-08T00:00:00.000Z', endsAt: '2026-10-08T08:00:00.000Z' },
+        headers: authHeaders(org.accessToken),
+      });
+      const phaseId = JSON.parse(created.body).data.id;
+      const rename = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/phases/${phaseId}`,
+        payload: { name: 'ideation' },
+        headers: authHeaders(org.accessToken),
+      });
+      expect(rename.statusCode).toBe(200);
+      expect(JSON.parse(rename.body).data.name).toBe('ideation');
+    });
+
+    it('deletes only the target phase and preserves the rest', async () => {
+      clearStore();
+      const org = await registerAndLogin(app, 'phasedel@test.hmt', 'Str0ngPass123!', 'ORGANIZER');
+      const manual = await app.inject({ method: 'POST', url: '/api/v1/hackathons', payload: { title: 'Del Hack', description: 'Desc' }, headers: authHeaders(org.accessToken) });
+      const hackId = JSON.parse(manual.body).data.id;
+      const ids: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        const base = Date.parse('2026-11-01T00:00:00.000Z') + i * 2 * 86400000;
+        const res = await app.inject({
+          method: 'POST',
+          url: `/api/v1/hackathons/${hackId}/phases`,
+          payload: { name: 'registration', order: i + 1, startsAt: new Date(base).toISOString(), endsAt: new Date(base + 86400000).toISOString() },
+          headers: authHeaders(org.accessToken),
+        });
+        ids.push(JSON.parse(res.body).data.id);
+      }
+      const del = await app.inject({ method: 'DELETE', url: `/api/v1/phases/${ids[1]}`, headers: authHeaders(org.accessToken) });
+      expect(del.statusCode).toBe(200);
+      const list = await app.inject({ method: 'GET', url: `/api/v1/hackathons/${hackId}/phases`, headers: authHeaders(org.accessToken) });
+      const remaining = JSON.parse(list.body).data.map((p: any) => p.id);
+      expect(remaining).toContain(ids[0]);
+      expect(remaining).not.toContain(ids[1]);
+      expect(remaining).toContain(ids[2]);
+    });
+
+    it('rejects duplicate order and enforces ownership on update/delete', async () => {
+      clearStore();
+      const org = await registerAndLogin(app, 'phaseown@test.hmt', 'Str0ngPass123!', 'ORGANIZER');
+      const other = await registerAndLogin(app, 'phaseother@test.hmt', 'Str0ngPass123!', 'ORGANIZER');
+      const participant = await registerAndLogin(app, 'phasepart@test.hmt', 'Str0ngPass123!', 'PARTICIPANT');
+      const manual = await app.inject({ method: 'POST', url: '/api/v1/hackathons', payload: { title: 'Own Hack', description: 'Desc' }, headers: authHeaders(org.accessToken) });
+      const hackId = JSON.parse(manual.body).data.id;
+      const base = Date.parse('2026-11-01T00:00:00.000Z');
+      await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/phases`, payload: { name: 'registration', order: 1, startsAt: new Date(base).toISOString(), endsAt: new Date(base + 86400000).toISOString() }, headers: authHeaders(org.accessToken) });
+      const dup = await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/phases`, payload: { name: 'ideation', order: 1, startsAt: new Date(base + 2 * 86400000).toISOString(), endsAt: new Date(base + 3 * 86400000).toISOString() }, headers: authHeaders(org.accessToken) });
+      expect(dup.statusCode).toBe(400);
+      const phaseId = JSON.parse((await app.inject({ method: 'GET', url: `/api/v1/hackathons/${hackId}/phases`, headers: authHeaders(org.accessToken) })).body).data[0].id;
+      // Participant cannot update (IDOR/role)
+      const partUpdate = await app.inject({ method: 'PATCH', url: `/api/v1/phases/${phaseId}`, payload: { name: 'Hacked' }, headers: authHeaders(participant.accessToken) });
+      expect(partUpdate.statusCode).toBe(403);
+      // Other organizer cannot update or delete
+      const otherUpdate = await app.inject({ method: 'PATCH', url: `/api/v1/phases/${phaseId}`, payload: { name: 'Hacked' }, headers: authHeaders(other.accessToken) });
+      expect(otherUpdate.statusCode).toBe(403);
+      const otherDelete = await app.inject({ method: 'DELETE', url: `/api/v1/phases/${phaseId}`, headers: authHeaders(other.accessToken) });
+      expect(otherDelete.statusCode).toBe(403);
+      // Unknown phase id
+      const missing = await app.inject({ method: 'PATCH', url: '/api/v1/phases/no-such-phase', payload: { name: 'x' }, headers: authHeaders(org.accessToken) });
+      expect(missing.statusCode).toBe(404);
+    });
+
+    it('returns clean 401 for invalid tokens without leaking internals', async () => {
+      clearStore();
+      const res = await app.inject({ method: 'GET', url: '/api/v1/hackathons/some-id/phases', headers: { Authorization: 'Bearer invalid.token.here' } });
+      expect(res.statusCode).toBe(401);
+      expect(JSON.parse(res.body).error.code).toBe('UNAUTHORIZED');
+    });
+
+    it('returns phases sorted by order ASC regardless of insertion order', async () => {
+      clearStore();
+      const org = await registerAndLogin(app, 'phaseorder@test.hmt', 'Str0ngPass123!', 'ORGANIZER');
+      const manual = await app.inject({ method: 'POST', url: '/api/v1/hackathons', payload: { title: 'Order Hack', description: 'Desc' }, headers: authHeaders(org.accessToken) });
+      const hackId = JSON.parse(manual.body).data.id;
+      const base = Date.parse('2026-11-01T00:00:00.000Z');
+      // Insert out of order: 3, 1, 2
+      for (const [name, order, off] of [['ideation', 3, 4], ['registration', 1, 0], ['team_formation', 2, 2]] as Array<[string, number, number]>) {
+        const res = await app.inject({
+          method: 'POST',
+          url: `/api/v1/hackathons/${hackId}/phases`,
+          payload: { name, order, startsAt: new Date(base + off * 86400000).toISOString(), endsAt: new Date(base + (off + 1) * 86400000).toISOString() },
+          headers: authHeaders(org.accessToken),
+        });
+        expect(res.statusCode).toBe(201);
+      }
+      const list = await app.inject({ method: 'GET', url: `/api/v1/hackathons/${hackId}/phases`, headers: authHeaders(org.accessToken) });
+      expect(JSON.parse(list.body).data.map((p: any) => p.order)).toEqual([1, 2, 3]);
+    });
+
+    it('recreated order-1 phase sorts first after delete', async () => {
+      clearStore();
+      const org = await registerAndLogin(app, 'phaserecreate@test.hmt', 'Str0ngPass123!', 'ORGANIZER');
+      const manual = await app.inject({ method: 'POST', url: '/api/v1/hackathons', payload: { title: 'Recreate Hack', description: 'Desc' }, headers: authHeaders(org.accessToken) });
+      const hackId = JSON.parse(manual.body).data.id;
+      const base = Date.parse('2026-11-01T00:00:00.000Z');
+      const ids: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        const res = await app.inject({
+          method: 'POST',
+          url: `/api/v1/hackathons/${hackId}/phases`,
+          payload: { name: `phase${i + 1}`, order: i + 1, startsAt: new Date(base + i * 2 * 86400000).toISOString(), endsAt: new Date(base + (i * 2 + 1) * 86400000).toISOString() },
+          headers: authHeaders(org.accessToken),
+        });
+        ids.push(JSON.parse(res.body).data.id);
+      }
+      await app.inject({ method: 'DELETE', url: `/api/v1/phases/${ids[0]}`, headers: authHeaders(org.accessToken) });
+      const recreated = await app.inject({
+        method: 'POST',
+        url: `/api/v1/hackathons/${hackId}/phases`,
+        payload: { name: 'registration', order: 1, startsAt: new Date(base).toISOString(), endsAt: new Date(base + 86400000).toISOString() },
+        headers: authHeaders(org.accessToken),
+      });
+      expect(recreated.statusCode).toBe(201);
+      expect(JSON.parse(recreated.body).data.id).not.toBe(ids[0]);
+      const list = await app.inject({ method: 'GET', url: `/api/v1/hackathons/${hackId}/phases`, headers: authHeaders(org.accessToken) });
+      const rows = JSON.parse(list.body).data;
+      expect(rows.map((p: any) => p.order)).toEqual([1, 2, 3]);
+      expect(rows[0].name).toBe('registration');
+    });
   });
 
   describe('Participants + Teams privacy boundaries', () => {
@@ -672,7 +943,7 @@ describe('Organizer Backend — Terminal 3 Comprehensive', () => {
       };
       const gen = await app.inject({ method: 'POST', url: '/api/v1/hackathons/draft/generate', payload: input, headers: authHeaders(org.accessToken) });
       const hackId = JSON.parse(gen.body).data.hackathon.id;
-      // Seed demo data
+      expect((await materializeWindow(app, hackId, org.accessToken)).statusCode).toBe(201);
       await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/seed-demo`, headers: authHeaders(org.accessToken) });
       const teams = await app.inject({ method: 'GET', url: `/api/v1/hackathons/${hackId}/teams`, headers: authHeaders(org.accessToken) });
       expect(teams.statusCode).toBe(200);
@@ -1070,6 +1341,7 @@ describe('Organizer Backend — Terminal 3 Comprehensive', () => {
       };
       const gen = await app.inject({ method: 'POST', url: '/api/v1/hackathons/draft/generate', payload: input, headers: authHeaders(org.accessToken) });
       let hackId = JSON.parse(gen.body).data.hackathon.id;
+      expect((await materializeWindow(app, hackId, org.accessToken)).statusCode).toBe(201);
       // Go through workflow to PUBLISHED
       await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/review`, headers: authHeaders(org.accessToken) });
       await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/confirm`, headers: authHeaders(org.accessToken) });
@@ -1124,6 +1396,7 @@ describe('Organizer Backend — Terminal 3 Comprehensive', () => {
       };
       const gen = await app.inject({ method: 'POST', url: '/api/v1/hackathons/draft/generate', payload: input, headers: authHeaders(org.accessToken) });
       const hackId = JSON.parse(gen.body).data.hackathon.id;
+      expect((await materializeWindow(app, hackId, org.accessToken)).statusCode).toBe(201);
       await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/seed-demo`, headers: authHeaders(org.accessToken) });
       // Create a mentor and feedback to populate evaluation stats
       const mentor = await registerAndLogin(app, 'analyticmentor@test.hmt', 'Str0ngPass123!', 'MENTOR');
@@ -1269,6 +1542,7 @@ describe('Organizer Backend — Terminal 3 Comprehensive', () => {
       };
       const gen = await app.inject({ method: 'POST', url: '/api/v1/hackathons/draft/generate', payload: input, headers: authHeaders(org.accessToken) });
       const hackId = JSON.parse(gen.body).data.hackathon.id;
+      expect((await materializeWindow(app, hackId, org.accessToken)).statusCode).toBe(201);
       await app.inject({ method: 'PATCH', url: `/api/v1/hackathons/${hackId}`, payload: { description: 'Audit edit' }, headers: authHeaders(org.accessToken) });
       await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/review`, headers: authHeaders(org.accessToken) });
       await app.inject({ method: 'POST', url: `/api/v1/hackathons/${hackId}/confirm`, headers: authHeaders(org.accessToken) });

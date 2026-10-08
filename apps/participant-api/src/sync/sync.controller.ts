@@ -1,13 +1,13 @@
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { SyncAuthGuard } from './sync-auth.guard';
 import { PrismaService } from '../database/prisma.service';
 import { SyncService } from './sync.service';
 
 @ApiTags('sync')
 @ApiBearerAuth()
 @Controller('sync')
-@UseGuards(JwtAuthGuard)
 export class SyncController {
   constructor(
     private readonly sync: SyncService,
@@ -16,12 +16,14 @@ export class SyncController {
 
   /** Consume a single versioned HackathonPublished event (idempotent). */
   @Post('consume')
+  @UseGuards(SyncAuthGuard)
   async consume(@Body() event: unknown) {
-    return this.sync.consumePublishedEvent(event);
+    return this.sync.consume(event);
   }
 
   /** Batch consume (e.g. drained from organizer GET /sync/outbox). */
   @Post('consume-batch')
+  @UseGuards(SyncAuthGuard)
   async consumeBatch(@Body() body: { events: unknown[] }) {
     const events = Array.isArray(body?.events) ? body.events : [];
     return { results: await this.sync.consumeMany(events) };
@@ -29,6 +31,7 @@ export class SyncController {
 
   /** Pull organizer outbox over HTTP and consume (same ID end-to-end). */
   @Post('pull')
+  @UseGuards(JwtAuthGuard)
   async pull(@Body() body: { organizerBaseUrl: string; token?: string; limit?: number }) {
     const base = (body?.organizerBaseUrl || '').replace(/\/$/, '');
     if (!base) throw Object.assign(new Error('organizerBaseUrl required'), { status: 400 });
@@ -60,6 +63,7 @@ export class SyncController {
   }
 
   @Get('consumed')
+  @UseGuards(JwtAuthGuard)
   async consumed() {
     const all = await (this.prisma as any).consumedEvent
       ? { note: 'see hackathon list for consumed records' }

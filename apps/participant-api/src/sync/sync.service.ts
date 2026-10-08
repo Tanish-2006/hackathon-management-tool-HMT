@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
-import { hackathonPublishedSchema } from '@hmt/contracts';
+import { hackathonArchivedSchema, hackathonPublishedSchema } from '@hmt/contracts';
 
 /**
  * Sync consumer — organizer → participant canonical transport.
@@ -83,11 +83,55 @@ export class SyncService {
     const results: Array<Record<string, unknown>> = [];
     for (const e of events) {
       try {
-        results.push({ ok: true, ...(await this.consumePublishedEvent(e)) });
+        results.push({ ok: true, ...(await this.consume(e)) });
       } catch (err: any) {
         results.push({ ok: false, error: err?.message ?? 'consume failed' });
       }
     }
     return results;
+  }
+
+  /** Dispatch by event type; unknown types fall through to the published path. */
+  async consume(event: unknown) {
+    const type = (event as any)?.type;
+    if (type === 'HackathonArchived') return this.consumeArchivedEvent(event);
+    return this.consumePublishedEvent(event);
+  }
+
+  /**
+   * Apply a HackathonArchived event: flip a known record to ARCHIVED so it
+   * drops out of active discovery while detail/history still resolve.
+   * Idempotent by eventId, same as the published path. Unknown hackathon IDs
+   * are acknowledged without effect (never fabricate records here).
+   */
+  async consumeArchivedEvent(event: unknown) {
+    const parsed = hackathonArchivedSchema.safeParse(event);
+    if (!parsed.success) {
+      throw Object.assign(new Error('Invalid HackathonArchived event'), {
+        status: 400,
+        details: parsed.error.issues,
+      });
+    }
+    const evt = parsed.data;
+    const existing = await this.prisma.consumedEvent.findUnique({
+      where: { eventId: evt.eventId },
+    } as any);
+    if (existing) {
+      return { deduped: true, eventId: evt.eventId, hackathonId: evt.payload.hackathonId };
+    }
+    const record = await (this.prisma.hackathon as any).findUnique?.({
+      where: { id: evt.payload.hackathonId },
+    }).catch(() => null);
+    if (record) {
+      await (this.prisma.hackathon as any).update({
+        where: { id: evt.payload.hackathonId },
+        data: { status: 'ARCHIVED', updatedAt: new Date() },
+      });
+    }
+    await this.prisma.consumedEvent.create({
+      data: { eventId: evt.eventId, hackathonId: evt.payload.hackathonId },
+    } as any);
+    this.logger.log(`Consumed HackathonArchived ${evt.payload.hackathonId} (${evt.eventId})`);
+    return { deduped: false, eventId: evt.eventId, hackathonId: evt.payload.hackathonId };
   }
 }

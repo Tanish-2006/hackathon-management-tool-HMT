@@ -25,6 +25,7 @@ export default function ParticipantHackathons(){
   const [selectedId,setSelectedId]=useState<string|null>(null);
   const [detail,setDetail]=useState<any>(null);
   const [detailLoading,setDetailLoading]=useState(false);
+  const [detailError,setDetailError]=useState<string|null>(null);
   const [tab,setTab]=useState<typeof TABS[number]>('Overview');
   const [registerMsg,setRegisterMsg]=useState<string|null>(null);
   const [registering,setRegistering]=useState(false);
@@ -52,7 +53,10 @@ export default function ParticipantHackathons(){
     if(!selectedId) { setDetail(null); return; }
     let m=true;
     setDetailLoading(true);
-    hmtBackendService.getHackathonById(selectedId).then(d=>{ if(m){ setDetail(d); setTab('Overview'); setRegisterMsg(null);} }).catch(()=>{ if(m) setDetail(rows.find(r=>r.id===selectedId) ?? null); }).finally(()=>{ if(m) setDetailLoading(false); });
+    setDetailError(null);
+    // A failed detail fetch falls back to the list row (no phases/criteria),
+    // but the failure is surfaced instead of silently masked.
+    hmtBackendService.getHackathonById(selectedId).then(d=>{ if(m){ setDetail(d); setTab('Overview'); setRegisterMsg(null);} }).catch((e:any)=>{ if(m){ setDetail(rows.find(r=>r.id===selectedId) ?? null); setDetailError(e?.message || 'Could not load full details.'); } }).finally(()=>{ if(m) setDetailLoading(false); });
     return ()=>{ m=false; };
   },[selectedId]);
 
@@ -145,6 +149,7 @@ export default function ParticipantHackathons(){
         <div id="details" className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6">
           {detailLoading ? <div className="text-sm text-[#77798a]">Loading details…</div> : selected ? (
             <>
+              {detailError && <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">{detailError} Showing list summary instead.</div>}
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-lg font-bold tracking-tight">{selected.title}</h2>
                 <Badge tone="dark">{selected.derivedStatus ?? selected.status}</Badge>

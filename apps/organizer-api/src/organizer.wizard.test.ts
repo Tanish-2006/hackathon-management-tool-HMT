@@ -154,6 +154,8 @@ describe('Organizer wizard automation', () => {
     const gen = await generateWizard();
     const { hackathon } = JSON.parse(gen.body).data;
     const id = hackathon.id;
+    // AI drafts carry dateless suggestions: set the explicit window first.
+    expect((await app.inject({ method: 'POST', url: `/api/v1/hackathons/${id}/timeline/materialize`, payload: { eventStart: '2026-11-01T09:00:00.000Z', eventEnd: '2026-11-04T18:00:00.000Z' }, headers: auth(orgToken) })).statusCode).toBe(201);
     // direct publish blocked
     const direct = await app.inject({ method: 'POST', url: `/api/v1/hackathons/${id}/direct-publish`, headers: auth(orgToken), payload: {} });
     expect(direct.statusCode).toBe(400);

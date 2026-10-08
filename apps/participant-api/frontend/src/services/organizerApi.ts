@@ -284,6 +284,7 @@ export const organizerApi = {
   // ---------- Timeline / Phases ----------
   async createPhase(hackathonId: string, data: { name: string; order: number; startsAt: string; endsAt: string; description?: string }): Promise<any> { const res = await fetchOrganizer(`/hackathons/${hackathonId}/phases`, { method: 'POST', body: JSON.stringify(data) }); return unwrapData<any>(res); },
   async listPhases(hackathonId: string): Promise<any[]> { const res = await fetchOrganizer(`/hackathons/${hackathonId}/phases`); return unwrapData<any[]>(res) ?? []; },
+  async materializeTimeline(hackathonId: string, window: { eventStart: string; eventEnd: string }): Promise<{ hackathon: any; phases: any[] }> { const res = await fetchOrganizer(`/hackathons/${hackathonId}/timeline/materialize`, { method: 'POST', body: JSON.stringify(window) }); return unwrapData<any>(res); },
   async updatePhase(phaseId: string, data: any): Promise<any> { const res = await fetchOrganizer(`/phases/${phaseId}`, { method: 'PATCH', body: JSON.stringify(data) }); return unwrapData<any>(res); },
   async deletePhase(phaseId: string): Promise<any> { return fetchOrganizer(`/phases/${phaseId}`, { method: 'DELETE' }); },
 

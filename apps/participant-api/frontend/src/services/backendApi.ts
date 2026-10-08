@@ -248,7 +248,11 @@ export const hmtBackendService = {
   async getCurrentHackathon(): Promise<any> { const res = await fetchWithAuth('/hackathons/current'); return unwrap<any>(res); },
   async listHackathons(params: Record<string,string|number>={}): Promise<any> {
     const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).map(([k,v])=>[k,String(v)]))).toString();
-    const res = await fetchWithAuth(`/hackathons${qs?'?'+qs:''}`); return unwrap<any>(res);
+    const res = await fetchWithAuth(`/hackathons${qs?'?'+qs:''}`);
+    // Preserve the {data, pagination} envelope (unwrap() would drop pagination,
+    // breaking total counts). The sole caller handles both shapes.
+    if (res && Array.isArray(res.data)) return res;
+    return unwrap<any>(res);
   },
   async getHackathonById(id: string): Promise<any> { const res = await fetchWithAuth(`/hackathons/${id}`); return unwrap<any>(res); },
   async getHackathonResources(id: string): Promise<any> { const res = await fetchWithAuth(`/hackathons/${id}/resources`); return unwrap<any>(res); },

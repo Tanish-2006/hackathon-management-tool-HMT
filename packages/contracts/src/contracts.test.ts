@@ -1,13 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { domainEventSchema, ALL_EVENT_TYPES } from './events';
+import { domainEventSchema, ALL_EVENT_TYPES, hackathonArchivedSchema } from './events';
 import { healthResponseSchema } from './api';
 
 describe('contracts - events', () => {
-  it('lists all 8 event types', () => {
+  it('lists all 9 event types', () => {
     expect(ALL_EVENT_TYPES).toEqual(
       expect.arrayContaining([
         'HackathonPublished',
         'HackathonUpdated',
+        'HackathonArchived',
         'HackathonPhaseChanged',
         'TeamCreated',
         'TeamUpdated',
@@ -16,7 +17,19 @@ describe('contracts - events', () => {
         'ParticipantStatusChanged',
       ]),
     );
-    expect(ALL_EVENT_TYPES.length).toBe(8);
+    expect(ALL_EVENT_TYPES.length).toBe(9);
+  });
+
+  it('validates HackathonArchived v1', () => {
+    const res = hackathonArchivedSchema.safeParse({
+      eventId: 'evt-a',
+      version: 'v1',
+      type: 'HackathonArchived',
+      occurredAt: new Date().toISOString(),
+      actorId: 'u1',
+      payload: { hackathonId: 'h1', archivedAt: new Date().toISOString() },
+    });
+    expect(res.success).toBe(true);
   });
 
   it('validates HackathonPublished v1', () => {

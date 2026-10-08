@@ -19,6 +19,15 @@ import {
   bucketForMyHackathons,
 } from '@hmt/common';
 
+// Sub-resource endpoints must not leak DRAFT/REVIEW/CONFIRMED records when an
+// ID is guessed — same visibility rule as the detail endpoint itself.
+function assertPublishedForParticipants(h: any): void {
+  const st = h.status ?? (h.isPublished ? 'PUBLISHED' : 'DRAFT');
+  if (!['PUBLISHED', 'ARCHIVED'].includes(st)) {
+    throw new NotFoundException('Hackathon not found');
+  }
+}
+
 function toDiscoverRow(h: any) {
   const derived = deriveLifecycleStatus({
     status: h.status ?? (h.isPublished ? 'PUBLISHED' : 'DRAFT'),
@@ -90,8 +99,12 @@ export class HackathonController {
       orderBy: { createdAt: 'desc' },
     } as any);
     // Only public lifecycle states (never DRAFT/REVIEW/CONFIRMED).
+    // Default discovery is PUBLISHED-only; ARCHIVED is history, reachable
+    // explicitly via ?status=ARCHIVED (detail/history still resolve below).
+    const onlyPublished = !status || status === 'PUBLISHED';
     all = all.filter((h: any) => {
       const st = h.status ?? (h.isPublished ? 'PUBLISHED' : 'DRAFT');
+      if (onlyPublished) return st === 'PUBLISHED';
       return ['PUBLISHED', 'ARCHIVED'].includes(st);
     });
     if (search?.trim()) all = all.filter((h: any) => matchesSearch(h, search.trim()));
@@ -121,13 +134,14 @@ export class HackathonController {
 
   @Get('current')
   async getCurrentHackathon() {
+    // The "current" hackathon is an active PUBLISHED one — never ARCHIVED.
     const hackathon = await this.prisma.hackathon.findFirst({
       where: { isPublished: true },
       orderBy: { createdAt: 'desc' },
       include: { announcements: true },
     } as any);
 
-    if (!hackathon) {
+    if (!hackathon || (hackathon.status ?? 'PUBLISHED') === 'ARCHIVED') {
       // Honest empty — never auto-seed hardcoded mocks (real API is authoritative).
       return null;
     }
@@ -361,6 +375,7 @@ export class HackathonController {
   async getPhases(@Param('id') id: string) {
     const h = await this.prisma.hackathon.findUnique({ where: { id } } as any);
     if (!h) throw new NotFoundException('Hackathon not found');
+    assertPublishedForParticipants(h);
     return { phases: h.phases || [] };
   }
 
@@ -368,6 +383,7 @@ export class HackathonController {
   async getJudgingCriteria(@Param('id') id: string) {
     const h = await this.prisma.hackathon.findUnique({ where: { id } } as any);
     if (!h) throw new NotFoundException('Hackathon not found');
+    assertPublishedForParticipants(h);
     return { judgingCriteria: h.judgingCriteria || [] };
   }
 }

@@ -131,6 +131,14 @@ export const hackathonUpdatedSchema = baseEventSchema.extend({
   }),
 });
 
+export const hackathonArchivedSchema = baseEventSchema.extend({
+  type: z.literal('HackathonArchived'),
+  payload: z.object({
+    hackathonId: z.string().min(1),
+    archivedAt: isoDateSchema,
+  }),
+});
+
 export const hackathonPhaseChangedSchema = baseEventSchema.extend({
   type: z.literal('HackathonPhaseChanged'),
   payload: z.object({
@@ -205,6 +213,7 @@ export const participantStatusChangedSchema = baseEventSchema.extend({
 export const domainEventSchema = z.discriminatedUnion('type', [
   hackathonPublishedSchema,
   hackathonUpdatedSchema,
+  hackathonArchivedSchema,
   hackathonPhaseChangedSchema,
   teamCreatedSchema,
   teamUpdatedSchema,
@@ -216,6 +225,7 @@ export const domainEventSchema = z.discriminatedUnion('type', [
 export type DomainEvent = z.infer<typeof domainEventSchema>;
 export type HackathonPublishedEvent = z.infer<typeof hackathonPublishedSchema>;
 export type HackathonUpdatedEvent = z.infer<typeof hackathonUpdatedSchema>;
+export type HackathonArchivedEvent = z.infer<typeof hackathonArchivedSchema>;
 export type HackathonPhaseChangedEvent = z.infer<typeof hackathonPhaseChangedSchema>;
 export type TeamCreatedEvent = z.infer<typeof teamCreatedSchema>;
 export type TeamUpdatedEvent = z.infer<typeof teamUpdatedSchema>;
@@ -226,6 +236,7 @@ export type ParticipantStatusChangedEvent = z.infer<typeof participantStatusChan
 export const ALL_EVENT_TYPES = [
   'HackathonPublished',
   'HackathonUpdated',
+  'HackathonArchived',
   'HackathonPhaseChanged',
   'TeamCreated',
   'TeamUpdated',

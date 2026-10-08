@@ -1,14 +1,44 @@
 import { randomUUID } from 'crypto';
-import type { HackathonPhase } from '../../domain/types';
+import type { Hackathon, HackathonPhase } from '../../domain/types';
 import { memoryStore } from '../../store/memory.store';
 import { auditService } from '../audit/audit.service';
+
+/**
+ * Enforce the explicit event window when one is configured. All comparisons
+ * use epoch milliseconds (UTC instants); no calendar math, no locale parsing.
+ * Throws 400 naming the violated bound. No-op for windowless hackathons.
+ */
+function assertPhaseInWindow(
+  hackathon: Hackathon,
+  startsAt: string,
+  endsAt: string,
+): void {
+  const ws = hackathon.eventStart ? new Date(hackathon.eventStart).getTime() : null;
+  const we = hackathon.eventEnd ? new Date(hackathon.eventEnd).getTime() : null;
+  if (ws === null || we === null || Number.isNaN(ws) || Number.isNaN(we)) return;
+  const s = new Date(startsAt).getTime();
+  const e = new Date(endsAt).getTime();
+  if (Number.isNaN(s) || Number.isNaN(e)) return; // date-shape errors belong to validateSingle
+  if (s < ws) {
+    throw Object.assign(
+      new Error(`Phase starts before the event (${hackathon.eventStart})`),
+      { statusCode: 400 },
+    );
+  }
+  if (e > we) {
+    throw Object.assign(
+      new Error(`Phase ends after the event (${hackathon.eventEnd})`),
+      { statusCode: 400 },
+    );
+  }
+}
 
 export interface CreatePhaseDto {
   name: string;
   order: number;
   startsAt: string;
   endsAt: string;
-  description?: string;
+  description?: string | null;
 }
 
 export class TimelineService {
@@ -20,6 +50,10 @@ export class TimelineService {
       if (user?.role !== 'ADMIN') throw Object.assign(new Error('Not owner'), { statusCode: 403 });
     }
     this.validateSingle(dto);
+    // Containment: when the hackathon declares an explicit event window,
+    // phases must fit completely inside it. Windowless hackathons keep the
+    // legacy sequential/no-overlap checks only (backward compatible).
+    assertPhaseInWindow(hackathon, dto.startsAt, dto.endsAt);
     // Check duplicate order
     const existing = Array.from(memoryStore.phases.values()).filter((p) => p.hackathonId === hackathonId);
     if (existing.some((p) => p.order === dto.order)) {
@@ -42,6 +76,7 @@ export class TimelineService {
       order: dto.order,
       startsAt: new Date(dto.startsAt).toISOString(),
       endsAt: new Date(dto.endsAt).toISOString(),
+      description: dto.description ?? null,
       status: 'UPCOMING',
       createdAt: now,
       updatedAt: now,
@@ -81,8 +116,10 @@ export class TimelineService {
     const newEndsAt = updates.endsAt ?? phase.endsAt;
     const newOrder = updates.order ?? phase.order;
     const newName = updates.name ?? phase.name;
+    const newDescription = updates.description !== undefined ? updates.description : phase.description;
 
     this.validateSingle({ name: newName, order: newOrder, startsAt: newStartsAt, endsAt: newEndsAt });
+    assertPhaseInWindow(hackathon, newStartsAt, newEndsAt);
 
     // Check order collision if changed
     if (newOrder !== phase.order) {
@@ -103,6 +140,7 @@ export class TimelineService {
       order: newOrder,
       startsAt: new Date(newStartsAt).toISOString(),
       endsAt: new Date(newEndsAt).toISOString(),
+      description: newDescription ?? null,
       updatedAt: new Date().toISOString(),
     };
     memoryStore.phases.set(phaseId, updated);

@@ -36,10 +36,17 @@ const baseEnvSchema = z.object({
   PARTICIPANT_API_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   ORGANIZER_API_PORT: z.coerce.number().int().min(1).max(65535).default(3002),
 
+  // Organizer → participant sync push target (base URL incl. /api/v1).
+  PARTICIPANT_API_URL: z.string().default('http://localhost:3000/api/v1'),
+
+  // Shared secret authenticating organizer → participant sync calls.
+  // Empty disables push (publish still succeeds locally). Never logged.
+  SYNC_SHARED_SECRET: z.string().default(''),
+
   // CORS
   CORS_ORIGINS: z
     .string()
-    .default('http://localhost:3000,http://localhost:3002,http://localhost:5173')
+    .default('http://localhost:3000,http://localhost:3002,http://localhost:5173,http://127.0.0.1:5173')
     .transform((v) => v.split(',').map((s) => s.trim())),
 
   // Rate limiting

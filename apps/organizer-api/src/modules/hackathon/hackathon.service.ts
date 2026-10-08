@@ -1,10 +1,11 @@
 import { randomUUID } from 'crypto';
-import type { Hackathon, HackathonDraft, HackathonDraftInput, HackathonStatus, HackathonPublishedEvent, RegenerableSection, SectionProvenance, WizardInput } from '../../domain/types';
+import type { Hackathon, HackathonDraft, HackathonDraftInput, HackathonStatus, HackathonPublishedEvent, HackathonPhase, RegenerableSection, SectionProvenance, WizardInput } from '../../domain/types';
 import { memoryStore } from '../../store/memory.store';
 import { MockAIDraftGenerator, DraftGeneratorFactory } from './draft-generator';
 import { buildWizardSections, deriveWorkingTitle, eligibilityToAudience, rebuildSection, splitDurationPlus, toBaseDraft } from './wizard-generator';
 import { wizardDraftSchema } from './hackathon.schemas';
 import { auditService } from '../audit/audit.service';
+import { normalizeTimeline, verifyTimelineInWindow } from '../timeline/timeline-normalizer';
 import { AIService } from '@hmt/ai';
 import { AIGateway } from '@hmt/ai';
 import { loadBaseEnv } from '@hmt/config';
@@ -174,24 +175,10 @@ export class HackathonService {
       });
     }
 
-    // Auto-create starter phases (with dummy dates 1 month from now, sequential)
-    const base = Date.now() + 86400000; // tomorrow
-    draft.phasesDraft.forEach((p, idx) => {
-      const pid = randomUUID();
-      const start = new Date(base + idx * 86400000 * 2);
-      const end = new Date(start.getTime() + 86400000 * 1.5);
-      memoryStore.phases.set(pid, {
-        id: pid,
-        hackathonId: id,
-        name: p.name,
-        order: p.order,
-        startsAt: start.toISOString(),
-        endsAt: end.toISOString(),
-        status: 'UPCOMING',
-        createdAt: now,
-        updatedAt: now,
-      });
-    });
+    // AI suggests phase names/order/descriptions only (phasesDraft is dateless
+    // by contract). Dated phases are NEVER invented here: they materialize
+    // later via materializeTimeline() once the organizer sets an explicit
+    // event window. See timeline-normalizer.ts (single authority for dates).
 
     // Auto-create theme if not exists
     if (draft.theme) {
@@ -416,18 +403,8 @@ export class HackathonService {
       aiGeneratedCriteriaIds.push(cid);
     }
     const aiGeneratedPhaseIds: string[] = [];
-    const base = Date.now() + 86400000;
-    draft.phasesDraft.forEach((p, idx) => {
-      const pid = randomUUID();
-      const start = new Date(base + idx * 86400000 * 2);
-      const end = new Date(start.getTime() + 86400000 * 1.5);
-      memoryStore.phases.set(pid, {
-        id: pid, hackathonId: id, name: p.name, order: p.order,
-        startsAt: start.toISOString(), endsAt: end.toISOString(),
-        status: 'UPCOMING', createdAt: now, updatedAt: now,
-      });
-      aiGeneratedPhaseIds.push(pid);
-    });
+    // No dated phases are invented here (see note above generateDraft):
+    // materializeTimeline() creates them once the event window is explicit.
     if (draft.theme) {
       const existingTheme = Array.from(memoryStore.themes.values()).find((t) => t.name.toLowerCase() === draft.theme.toLowerCase());
       let themeId: string;
@@ -471,7 +448,98 @@ export class HackathonService {
     return { hackathon, draft };
   }
 
-  // ---- Section-level regeneration: ONLY the requested section changes ----
+  /**
+   * Materialize AI-suggested phases into dated records inside an EXPLICIT
+   * event window. This is the only path that turns dateless `phasesDraft`
+   * suggestions into persisted `HackathonPhase` rows (single authority:
+   * timeline-normalizer.ts). Refuses when phases already exist so nothing is
+   * silently overwritten — delete or edit individual phases instead.
+   */
+  async materializeTimeline(
+    hackathonId: string,
+    organizerId: string,
+    window: { eventStart: string; eventEnd: string },
+    opts?: { ip?: string; requestId?: string },
+  ): Promise<{ hackathon: Hackathon; phases: unknown[] }> {
+    const hackathon = memoryStore.hackathons.get(hackathonId);
+    if (!hackathon) throw Object.assign(new Error('Hackathon not found'), { statusCode: 404 });
+    if (hackathon.organizerId !== organizerId) {
+      const user = memoryStore.users.get(organizerId);
+      if (user?.role !== 'ADMIN') throw Object.assign(new Error('Not owner'), { statusCode: 403 });
+    }
+    if (!['DRAFT', 'REVIEW'].includes(hackathon.status)) {
+      throw Object.assign(new Error(`Cannot edit timeline in status ${hackathon.status}. Only DRAFT/REVIEW editable.`), { statusCode: 400 });
+    }
+    const existing = Array.from(memoryStore.phases.values()).filter((p) => p.hackathonId === hackathonId);
+    if (existing.length > 0) {
+      throw Object.assign(new Error('Timeline already has phases. Edit or delete individual phases instead.'), { statusCode: 409 });
+    }
+    const meta = (hackathon.metadata ?? {}) as Record<string, unknown>;
+    const draft = (meta.draft ?? {}) as Record<string, unknown>;
+    const specs = (draft.phasesDraft ?? []) as Array<{ name: string; order: number; description?: string | null }>;
+    if (!Array.isArray(specs) || specs.length === 0) {
+      throw Object.assign(new Error('No AI phase suggestions to materialize for this hackathon'), { statusCode: 400 });
+    }
+    let dated;
+    try {
+      dated = normalizeTimeline(window.eventStart, window.eventEnd, specs);
+    } catch (e: any) {
+      throw Object.assign(new Error(e.message), { statusCode: 400 });
+    }
+    const problem = verifyTimelineInWindow(window.eventStart, window.eventEnd, dated);
+    if (problem) throw Object.assign(new Error(problem), { statusCode: 400 });
+
+    const now = new Date().toISOString();
+    const updated: Hackathon = {
+      ...hackathon,
+      eventStart: new Date(window.eventStart).toISOString(),
+      eventEnd: new Date(window.eventEnd).toISOString(),
+      updatedAt: now,
+      version: hackathon.version + 1,
+    };
+    memoryStore.hackathons.set(hackathonId, updated);
+    const phases: HackathonPhase[] = [];
+    for (const d of dated) {
+      const pid = randomUUID();
+      const record: HackathonPhase = {
+        id: pid,
+        hackathonId,
+        name: d.name as HackathonPhase['name'],
+        order: d.order,
+        startsAt: d.startsAt,
+        endsAt: d.endsAt,
+        description: d.description ?? null,
+        status: 'UPCOMING',
+        createdAt: now,
+        updatedAt: now,
+      };
+      memoryStore.phases.set(pid, record);
+      phases.push(record);
+      await auditService.log({
+        actorId: organizerId,
+        actorRole: 'ORGANIZER',
+        action: 'phase.created',
+        resourceType: 'phase',
+        resourceId: pid,
+        outcome: 'success',
+        ip: opts?.ip ?? null,
+        requestId: opts?.requestId ?? null,
+        metadata: { hackathonId, name: d.name, order: d.order },
+      });
+    }
+    await auditService.log({
+      actorId: organizerId,
+      actorRole: 'ORGANIZER',
+      action: 'hackathon.timeline_materialized',
+      resourceType: 'hackathon',
+      resourceId: hackathonId,
+      outcome: 'success',
+      ip: opts?.ip ?? null,
+      requestId: opts?.requestId ?? null,
+      metadata: { phaseCount: phases.length, eventStart: updated.eventStart, eventEnd: updated.eventEnd },
+    });
+    return { hackathon: updated, phases };
+  }
   async regenerateSection(
     id: string, organizerId: string, section: RegenerableSection, instruction: string | null | undefined,
     opts?: { ip?: string; requestId?: string },
@@ -631,6 +699,12 @@ export class HackathonService {
       updatedAt: now,
       publishedAt: null,
       archivedAt: null,
+      // Explicit event/registration windows persist when supplied (PATCH can
+      // set them later; timeline enforcement keys off these when present).
+      registrationStart: data.registrationStart ?? null,
+      registrationEnd: data.registrationEnd ?? null,
+      eventStart: data.eventStart ?? null,
+      eventEnd: data.eventEnd ?? null,
       metadata: data.metadata ?? null,
     };
     memoryStore.hackathons.set(id, hackathon);
@@ -797,9 +871,104 @@ export class HackathonService {
       const event = await this.generatePublishedEvent(updated, organizerId);
       updated.metadata = { ...(updated.metadata ?? {}), lastPublishedEventId: event.eventId };
       memoryStore.hackathons.set(id, updated);
+      // Best-effort push to the participant read-model; never fails the transition.
+      void this.pushToParticipant(event).catch(() => undefined);
+    }
+
+    // If ARCHIVED, emit + push HackathonArchived so participant discovery
+    // drops it from active views (terminal state, same channel as publish).
+    if (target === 'ARCHIVED') {
+      const event = await this.generateArchivedEvent(updated, organizerId);
+      void this.pushToParticipant(event).catch(() => undefined);
     }
 
     return updated;
+  }
+
+  /**
+   * Best-effort delivery of a domain event to the participant API.
+   * Skipped (with warning) when SYNC_SHARED_SECRET/PARTICIPANT_API_URL are
+   * unset; failures are audit-logged and never thrown — the local transition
+   * already succeeded and manual replay stays available via POST /:id/replay.
+   */
+  private async pushToParticipant(event: { eventId: string; type: string }): Promise<void> {
+    let base = '';
+    let secret = '';
+    try {
+      const env = loadBaseEnv();
+      base = (env.PARTICIPANT_API_URL ?? '').replace(/\/$/, '');
+      secret = env.SYNC_SHARED_SECRET ?? '';
+    } catch {
+      return;
+    }
+    if (!base || !secret) return;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 5000);
+    try {
+      const res = await fetch(`${base}/sync/consume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-sync-secret': secret },
+        body: JSON.stringify(event),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) {
+        await auditService.log({
+          actorId: null,
+          actorRole: null,
+          action: 'hackathon.sync_push_failed',
+          resourceType: 'sync',
+          resourceId: event.eventId,
+          outcome: 'failure',
+          metadata: { type: event.type, status: res.status },
+        });
+      }
+    } catch {
+      await auditService.log({
+        actorId: null,
+        actorRole: null,
+        action: 'hackathon.sync_push_failed',
+        resourceType: 'sync',
+        resourceId: event.eventId,
+        outcome: 'failure',
+        metadata: { type: event.type },
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async generateArchivedEvent(
+    hackathon: Hackathon,
+    actorId: string,
+  ): Promise<{ eventId: string; version: 'v1'; type: 'HackathonArchived'; occurredAt: string; actorId: string | null; payload: { hackathonId: string; archivedAt: string } }> {
+    const event = {
+      eventId: randomUUID(),
+      version: 'v1' as const,
+      type: 'HackathonArchived' as const,
+      occurredAt: new Date().toISOString(),
+      actorId,
+      payload: {
+        hackathonId: hackathon.id,
+        archivedAt: hackathon.archivedAt ?? new Date().toISOString(),
+      },
+    };
+    memoryStore.outbox.push({
+      eventId: event.eventId,
+      type: event.type,
+      hackathonId: hackathon.id,
+      occurredAt: event.occurredAt,
+      payload: event.payload,
+    });
+    await auditService.log({
+      actorId,
+      actorRole: 'ORGANIZER',
+      action: 'hackathon.archived_event_generated',
+      resourceType: 'hackathon',
+      resourceId: hackathon.id,
+      outcome: 'success',
+      metadata: { eventId: event.eventId, version: event.version, type: event.type },
+    });
+    return event;
   }
 
   private allowedTransitions(from: HackathonStatus): HackathonStatus[] {
@@ -834,6 +1003,11 @@ export class HackathonService {
     if (phases.length === 0) return { valid: false, error: 'At least one phase required' };
     const validation = memoryStore.validateTimeline(phases.map((p) => ({ startsAt: p.startsAt, endsAt: p.endsAt, order: p.order })));
     if (!validation.valid) return { valid: false, error: validation.error };
+    // When an explicit event window is configured, every phase must fit inside it.
+    if (hackathon.eventStart && hackathon.eventEnd) {
+      const problem = verifyTimelineInWindow(hackathon.eventStart, hackathon.eventEnd, phases);
+      if (problem) return { valid: false, error: problem };
+    }
     return { valid: true };
   }
 

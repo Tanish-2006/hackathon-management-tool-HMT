@@ -51,7 +51,7 @@ async function bootstrap() {
 
   // CORS strict allowlist from env (fallback to localhost if not set)
   // Canonical dev ports: participant :3000, organizer :3002, frontend :5173.
-  const corsOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:3002,http://localhost:5173')
+  const corsOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:3002,http://localhost:5173,http://127.0.0.1:5173')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
@@ -71,7 +71,7 @@ async function bootstrap() {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'X-Correlation-Id'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Request-Id', 'X-Correlation-Id'],
     exposedHeaders: ['X-Request-Id'],
   });
 
@@ -88,7 +88,10 @@ async function bootstrap() {
   SwaggerModule.setup('docs/api', app, document);
 
   const port = process.env.PORT || 3000;
-  await app.listen(port, '0.0.0.0');
+  // Dual-stack bind: `localhost` resolves to ::1 first on modern systems and
+  // browsers attempt IPv6; an IPv4-only socket refuses them, surfacing as a
+  // misleading CORS/NetworkError. '::' accepts both families (bindv6only=0).
+  await app.listen(port, '::');
   logger.log(
     `HMT Participant Platform API running on http://localhost:${port}/api/v1`,
   );

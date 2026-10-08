@@ -29,6 +29,9 @@ describe('organizer-api - Fastify foundation', () => {
     process.env.JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'a'.repeat(32);
     process.env.JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'b'.repeat(32);
     process.env.REDIS_URL = process.env.REDIS_URL || 'redis://:hmt_redis_password@localhost:6379';
+    // Pin the dev allowlist so the CORS regression tests are deterministic
+    // regardless of ambient environment configuration.
+    process.env.CORS_ORIGINS = 'http://localhost:5173,http://127.0.0.1:5173';
     app = await buildApp();
   });
 
@@ -70,5 +73,44 @@ describe('organizer-api - Fastify foundation', () => {
     const res = await app.inject({ method: 'GET', url: '/api/v1' });
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body).service).toBe('hmt-organizer-api');
+  });
+
+  describe('CORS preflight regression', () => {
+    it('answers OPTIONS preflight for allowed frontend origins', async () => {
+      for (const origin of ['http://localhost:5173', 'http://127.0.0.1:5173']) {
+        const res = await app.inject({
+          method: 'OPTIONS',
+          url: '/api/v1/auth/register',
+          headers: {
+            origin,
+            'access-control-request-method': 'POST',
+            'access-control-request-headers': 'content-type,authorization',
+          },
+        });
+        expect([200, 204]).toContain(res.statusCode);
+        expect(res.headers['access-control-allow-origin']).toBe(origin);
+        expect(res.headers['access-control-allow-credentials']).toBe('true');
+        const methods = String(res.headers['access-control-allow-methods'] || '');
+        for (const m of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']) {
+          expect(methods).toContain(m);
+        }
+        const headers = String(res.headers['access-control-allow-headers'] || '').toLowerCase();
+        for (const h of ['content-type', 'authorization', 'accept', 'x-request-id']) {
+          expect(headers).toContain(h);
+        }
+      }
+    });
+
+    it('does not echo an unapproved origin', async () => {
+      const res = await app.inject({
+        method: 'OPTIONS',
+        url: '/api/v1/auth/register',
+        headers: {
+          origin: 'http://evil.example.com',
+          'access-control-request-method': 'POST',
+        },
+      });
+      expect(res.headers['access-control-allow-origin']).not.toBe('http://evil.example.com');
+    });
   });
 });

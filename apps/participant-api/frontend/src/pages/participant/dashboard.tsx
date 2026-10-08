@@ -60,6 +60,14 @@ export default function ParticipantDashboard() {
         ]);
         if (!mounted) return;
         const hv = h.status === 'fulfilled' ? (h.value as any) : null;
+        // A rejected hackathon fetch is a real failure (auth/network/server) —
+        // surface it instead of masquerading as "no hackathon published yet".
+        // Genuine emptiness resolves successfully with null.
+        if (h.status === 'rejected') {
+          if (mounted) setError(friendlyError(h.reason));
+          if (mounted) setLoading(false);
+          return;
+        }
         setHackathon(hv);
         // Registration + AI availability (backend-derived, operational home only).
         if (hv?.id) {
