@@ -26,16 +26,17 @@ import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
 
 @ApiTags('auth')
 @Controller('auth')
-@UseGuards(AuthRateLimitGuard)
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  @UseGuards(AuthRateLimitGuard)
   @Post('register')
   @ApiOperation({ summary: 'Register participant' })
   async register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }
 
+  @UseGuards(AuthRateLimitGuard)
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login' })
@@ -43,6 +44,7 @@ export class AuthController {
     return this.authService.login(dto);
   }
 
+  @UseGuards(AuthRateLimitGuard)
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   async refresh(@Body() dto: RefreshDto) {
@@ -81,6 +83,7 @@ export class AuthController {
     return this.authService.requestEmailVerification(req.user.id);
   }
 
+  @UseGuards(AuthRateLimitGuard)
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verify email with token' })
@@ -89,7 +92,7 @@ export class AuthController {
   }
 
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, AuthRateLimitGuard)
   @Post('phone/request-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Resend phone verification OTP (Phase 1 phone identity)' })
@@ -98,7 +101,7 @@ export class AuthController {
   }
 
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, AuthRateLimitGuard)
   @Post('phone/verify')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verify phone number with OTP (Phase 1 phone identity)' })
@@ -106,6 +109,7 @@ export class AuthController {
     return this.authService.verifyPhone(req.user.id, dto.phoneNumber, dto.otp);
   }
 
+  @UseGuards(AuthRateLimitGuard)
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Initiate password reset' })
@@ -113,6 +117,7 @@ export class AuthController {
     return this.authService.forgotPassword(dto.email);
   }
 
+  @UseGuards(AuthRateLimitGuard)
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reset password with token' })

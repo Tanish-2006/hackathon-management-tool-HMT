@@ -6,7 +6,7 @@ const STORAGE_KEY = 'hmt_selected_hackathon';
 function readStored(): string | null {
   try {
     if (typeof window === 'undefined') return null;
-    const v = localStorage.getItem(STORAGE_KEY);
+    const v = new URLSearchParams(window.location.search).get('hackathon') || localStorage.getItem(STORAGE_KEY);
     return v && v.length > 0 ? v : null;
   } catch {
     return null;

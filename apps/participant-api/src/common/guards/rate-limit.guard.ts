@@ -48,7 +48,11 @@ export class RateLimitGuard implements CanActivate {
         ? req.body.email.trim().toLowerCase()
         : typeof req.body?.phoneNumber === 'string'
           ? req.body.phoneNumber
-          : 'anon';
+          : typeof req.body?.refreshToken === 'string'
+            ? `rt:${req.body.refreshToken.slice(-32)}`
+            : typeof req.body?.token === 'string'
+              ? `t:${req.body.token.slice(-32)}`
+              : 'anon';
     const key = `${req.ip || 'ip'}:${route}:${req.user?.id || bodyIdentity}`;
     const now = Date.now();
     sweepExpired(now);

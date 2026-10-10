@@ -56,6 +56,8 @@ function toAuthUser(me: any, source: AuthApi): AuthUser | null {
 
 const sessionClients = { participant: hmtBackendService, organizer: organizerApi };
 
+const SESSION_CHECK_ATTEMPTS = 3;
+
 async function loadSessionUser(api: AuthApi): Promise<AuthUser | null> {
   return toAuthUser(await sessionClients[api].getMe(), api);
 }
@@ -76,7 +78,7 @@ async function probeLegacySession(api: AuthApi): Promise<AuthUser | null> {
 
 async function fetchSessionUser(): Promise<AuthUser | null> {
   const api = getSessionApi();
-  if (api) return loadSessionUser(api).catch(() => null);
+  if (api) return loadSessionUser(api);
   for (const candidate of ['participant', 'organizer'] as const) {
     const user = await probeLegacySession(candidate);
     if (user) {
@@ -108,19 +110,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     if (mounted.current) setError(null);
     try {
-      const u = await fetchSessionUser();
-      if (!mounted.current) return;
-      if (u) {
-        setUser(u);
-      } else {
-        clearAuthTokens();
-        setUser(null);
+      for (let attempt = 1; attempt <= SESSION_CHECK_ATTEMPTS; attempt++) {
+        try {
+          const u = await fetchSessionUser();
+          if (!mounted.current) return;
+          if (!u) clearAuthTokens();
+          setUser(u);
+          return;
+        } catch (e: any) {
+          if (!mounted.current) return;
+          if (e?.status === 401 || e?.code === 'TOKEN_REUSE_DETECTED') {
+            clearAuthTokens();
+            setUser(null);
+            setError('Your session has ended. Please sign in again.');
+            return;
+          }
+          if (attempt < SESSION_CHECK_ATTEMPTS) await new Promise((r) => setTimeout(r, attempt * 1000));
+        }
       }
-    } catch {
-      if (!mounted.current) return;
-      clearAuthTokens();
       setUser(null);
-      setError('Session validation failed. Please sign in again.');
+      setError('We could not reach the server. Please try again in a moment.');
     } finally {
       if (mounted.current) setInitializing(false);
     }

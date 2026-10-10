@@ -16,25 +16,12 @@ export default function MyHackathons(){
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState<string|null>(null);
   const [bucket,setBucket]=useState<typeof BUCKETS[number]>('all');
-  const [ai,setAi]=useState<Record<string,any>>({});
 
   async function load(b: string){
     setLoading(true); setError(null);
     try{
       const res = await hmtBackendService.getMyHackathons(b==='all'?undefined:b);
-      setRows(res.data ?? []);
-      const live = (res.data ?? []).filter((r: any) => r.bucket === 'live');
-      const settled = await Promise.all(
-        live.map((r: any) =>
-          hmtBackendService.getAiAccessStatus(undefined, r.id).then(
-            (v) => [r.id, v] as const,
-            () => [r.id, null] as const,
-          ),
-        ),
-      );
-      const next: Record<string, any> = {};
-      for (const [id, v] of settled) next[id] = v;
-      setAi(next);
+      setRows(Array.isArray(res) ? res : res?.data ?? []);
     }catch(e){ setError(e instanceof ApiError?e.message:(e as Error)?.message||'Failed'); }
     finally{ setLoading(false); }
   }
@@ -65,12 +52,12 @@ export default function MyHackathons(){
                 <Badge tone={r.bucket==='live'?'coral':r.bucket==='completed'?'muted':'lime'}>{r.derivedStatus}</Badge>
               </div>
               <div className="mt-2 flex items-center gap-2 text-xs text-[#77798a]"><Clock3 size={12}/> {r.eventEnd?`Ends ${new Date(r.eventEnd).toLocaleDateString()}`:'—'} · {r.mode} · {r.registrationStatus}</div>
-              {r.bucket==='live' && (
+              {r.bucket!=='completed' && (
                 <div className="mt-3 rounded-xl bg-[#171a2d] p-3 text-xs text-[#fdfbf5]">
-                  <div className="flex items-center gap-2 font-bold"><Sparkles size={13} className="text-[#d8e35b]"/> AI teammate: {ai[r.id]?.allowed?'available':'not available'}</div>
-                  <div className="mt-1 text-[#9b9fb1]">{ai[r.id]?.allowed?'Ask questions about your project.':'Available while the hackathon is live.'}</div>
+                  <div className="flex items-center gap-2 font-bold"><Sparkles size={13} className="text-[#d8e35b]"/> AI Helper</div>
+                  <div className="mt-1 text-[#9b9fb1]">Work through the current ideation round with your team or on your own.</div>
                   <div className="mt-2 flex gap-2">
-                    <Link href={`/participant/my-hackathons/${r.id}/ai`} className="rounded-lg bg-[#d8e35b] px-3 py-1.5 font-bold text-[#171a2d]">Open AI</Link>
+                    <Link href={`/participant/ai-helper?hackathon=${r.id}`} className="rounded-lg bg-[#d8e35b] px-3 py-1.5 font-bold text-[#171a2d]">Open AI Helper</Link>
                     <Link href="/participant/projects" className="rounded-lg border border-[#3a3e5a] px-3 py-1.5">Project</Link>
                   </div>
                 </div>
