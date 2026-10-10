@@ -57,11 +57,13 @@ class Smoke:
         return body["accessToken"]
 
     def publish_ideathon(self, org):
-        status, body = self.api.call("POST", "/organizer/api/v1/hackathons", {
-            "title": f"Smoke Ideathon {self.stamp}", "description": "Incubate ideas end to end",
+        status, body = self.api.call("POST", "/organizer/api/v1/hackathons/wizard/generate", {
+            "mode": "HYBRID", "about": f"Smoke Ideathon {self.stamp}: incubate campus ideas",
+            "hackathonType": "OPEN_INNOVATION", "eligibility": ["Students"],
+            "durationPlus": "3 days\nIdeation only\nPrizes: best idea",
         }, org)
-        self.check("create hackathon", status in (200, 201), body)
-        hid = self.data(body)["id"]
+        self.check("create hackathon via wizard", status in (200, 201), body)
+        hid = self.data(body)["hackathon"]["id"]
         start = datetime.now(timezone.utc) + timedelta(days=1)
         status, body = self.api.call("POST", f"/organizer/api/v1/hackathons/{hid}/timeline/materialize", {
             "eventStart": start.isoformat().replace("+00:00", "Z"),
