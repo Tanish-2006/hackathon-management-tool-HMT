@@ -230,12 +230,16 @@ describe('team formation — registration gate + privacy', () => {
     const tid: string = team.inviteCode;
     expect(tid).toMatch(/^HMT-[A-Z2-9]{6}$/);
     const m: any = await teams.joinByCode(reqFor(joiner) as any, { teamName: 'innovators', tid: tid.toLowerCase(), hackathonId: 'hack-pub' } as any);
-    // Approval is mandatory: PENDING request, no membership, leader notified.
-    expect(m.status).toBe('PENDING');
+    expect(m.status).toBe('JOINED');
     const joined = await prisma.teamMember.findMany({ where: { teamId: team.id } } as any);
-    expect(joined.some((x: any) => x.userId === joiner)).toBe(false);
+    expect(joined.some((x: any) => x.userId === joiner && x.role === 'MEMBER')).toBe(true);
     const leaderNotifs = await (prisma as any).notification.findMany({ where: { userId: leader } });
-    expect(leaderNotifs.some((n: any) => n.type === 'JOIN_REQUESTED' && n.requestId === m.id)).toBe(true);
+    expect(leaderNotifs.some((n: any) => n.type === 'MEMBER_JOINED')).toBe(true);
+    await expect(
+      teams.joinByCode(reqFor(joiner) as any, { teamName: 'Innovators', tid, hackathonId: 'hack-pub' } as any),
+    ).rejects.toThrow(/Already in a team/);
+    const detail: any = await teams.getTeamById(reqFor(joiner) as any, team.id);
+    expect(detail.inviteCode).toBe(tid);
     // Wrong name, unknown TID, and cross-hackathon TID all look identical.
     await expect(
       teams.joinByCode(reqFor(stranger) as any, { teamName: 'Wrong', tid, hackathonId: 'hack-other' } as any),

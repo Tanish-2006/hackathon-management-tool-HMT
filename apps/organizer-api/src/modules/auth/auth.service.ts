@@ -86,6 +86,7 @@ export class AuthService {
 
     const passwordHash = await hashPassword(data.password);
     const id = randomUUID();
+    const phoneVerificationRequired = process.env.REQUIRE_PHONE_VERIFICATION !== 'false';
     const user = {
       id,
       email,
@@ -94,7 +95,7 @@ export class AuthService {
       displayName: data.displayName ?? data.fullName ?? email.split('@')[0],
       role,
       phoneNumber,
-      isPhoneVerified: false,
+      isPhoneVerified: !phoneVerificationRequired,
       isActive: true,
       isEmailVerified: false,
       createdAt: new Date().toISOString(),
@@ -134,7 +135,10 @@ export class AuthService {
       expiresIn: this.jwtConfig.accessTtlSec,
       // Phase 1: phone is required at registration — issue the first OTP inline.
       // Demo/testing only: raw OTP is SMS-sent in production.
-      ...(process.env.NODE_ENV === 'production' ? {} : { phoneOtp: this.issuePhoneOtp(id, phoneNumber) }),
+      phoneVerificationRequired,
+      ...(process.env.NODE_ENV === 'production' || !phoneVerificationRequired
+        ? {}
+        : { phoneOtp: this.issuePhoneOtp(id, phoneNumber) }),
     };
   }
 

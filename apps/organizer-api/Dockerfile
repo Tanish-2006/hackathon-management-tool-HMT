@@ -1,23 +1,25 @@
-# HMT Organizer API — production image (Fastify, port 3002).
-FROM node:22-alpine AS builder
+FROM node:22-slim AS base
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/* \
+ && corepack enable && corepack prepare pnpm@9.12.3 --activate
 WORKDIR /app
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY packages ./packages
-COPY apps/organizer-api ./apps/organizer-api
-RUN corepack enable && pnpm install --frozen-lockfile
-RUN pnpm --filter @hmt/organizer-api build
 
-FROM node:22-alpine AS runner
-WORKDIR /app
-ENV NODE_ENV=production
-ENV ORGANIZER_API_PORT=3002
-COPY package.json pnpm-workspace.yaml ./
+FROM base AS builder
+COPY pnpm-workspace.yaml package.json tsconfig.base.json ./
 COPY packages ./packages
-COPY apps/organizer-api/package.json ./apps/organizer-api/package.json
-COPY apps/organizer-api/dist ./apps/organizer-api/dist
-RUN corepack enable && pnpm install --prod --frozen-lockfile
-EXPOSE 3002
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:3002/api/v1/health || exit 1
+COPY apps/organizer-api/package.json apps/organizer-api/tsconfig.json apps/organizer-api/tsconfig.build.json ./apps/organizer-api/
+RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
+    pnpm install --no-frozen-lockfile --filter "{./apps/organizer-api}..."
+RUN pnpm --filter @hmt/database exec prisma generate \
+ && pnpm --filter "{./apps/organizer-api}^..." run build
+COPY apps/organizer-api/src ./apps/organizer-api/src
+RUN pnpm --dir apps/organizer-api run build
+
+FROM base AS runtime
+ENV NODE_ENV=production ORGANIZER_API_PORT=3002
+COPY --from=builder --chown=node:node /app /app
+WORKDIR /app/apps/organizer-api
 USER node
-CMD ["node", "apps/organizer-api/dist/main.js"]
+EXPOSE 3002
+HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=5 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:3002/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+CMD ["node", "dist/main.js"]

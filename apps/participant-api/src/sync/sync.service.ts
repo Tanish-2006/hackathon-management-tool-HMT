@@ -1,6 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
-import { hackathonArchivedSchema, hackathonPublishedSchema } from '@hmt/contracts';
+import { hackathonArchivedSchema, hackathonPublishedSchema, ideationConfigSchema } from '@hmt/contracts';
 
 /**
  * Sync consumer — organizer → participant canonical transport.
@@ -86,6 +86,14 @@ export class SyncService {
     } as any);
     this.logger.log(`Consumed HackathonPublished ${p.hackathonId} (${evt.eventId})`);
     return { deduped: false, eventId: evt.eventId, hackathonId: p.hackathonId };
+  }
+
+  async setIdeation(hackathonId: string, config: unknown) {
+    const parsed = ideationConfigSchema.safeParse(config);
+    if (!parsed.success) throw new BadRequestException({ message: 'Invalid ideation config', details: parsed.error.issues });
+    const updated = await this.prisma.hackathon.update({ where: { id: hackathonId }, data: { ideation: parsed.data } } as any);
+    if (!updated) throw new NotFoundException('Hackathon not found');
+    return { hackathonId, currentRound: parsed.data.currentRound };
   }
 
   async consumeMany(events: unknown[]) {

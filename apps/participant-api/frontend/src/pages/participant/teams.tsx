@@ -192,8 +192,8 @@ export default function ParticipantTeams(){
       if(!contextId) throw new Error('Select a hackathon context first');
       if(!joinName.trim() || !joinTid.trim()) throw new Error('Enter the team name and TID.');
       await hmtBackendService.joinByCode({ teamName: joinName.trim(), tid: joinTid.trim(), hackathonId: contextId });
-      setSuccess(`Request to join "${joinName.trim()}" sent — the team leader will review it. Check the bell for updates.`); setJoinName(''); setJoinTid('');
-      await refreshOutgoing();
+      setSuccess(`You joined "${joinName.trim()}".`); setJoinName(''); setJoinTid('');
+      await refreshScopedTeam();
     }catch(e){ setError(friendly(e)); }
     finally{ setActionLoading(null); }
   }

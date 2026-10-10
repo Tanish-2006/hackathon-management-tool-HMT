@@ -3,6 +3,7 @@ import { Link, useParams, useLocation } from 'wouter';
 import { AlertCircle, ArrowLeft, Calendar, CheckCircle2, Clock3, ExternalLink, FileText, Layers, Loader2, ShieldCheck, Sparkles, Users, Star, ChevronRight, Trash2, Edit2 } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { organizerApi, OrganizerApiError } from '@/services/organizerApi';
+import IdeationPanel from '@/pages/organizer/ideation-panel';
 
 function Badge({children,tone='muted'}:any){ const m:any={ lime:'bg-[#d8e35b] text-[#171a2d]', coral:'bg-[#f26a4f] text-white', blue:'bg-[#5aafbd] text-white', dark:'bg-[#171a2d] text-white', muted:'bg-[#e9e5da] text-[#77798a]' }; return <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${m[tone]||m.muted}`}>{children}</span> }
 function Card({children,className=''}:{children:React.ReactNode;className?:string}){ return <div className={`rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] ${className}`}>{children}</div> }
@@ -24,6 +25,7 @@ export default function OrganizerHackathonDetail(){
   const [actionMsg,setActionMsg]=useState<string|null>(null);
   const [actionErr,setActionErr]=useState<string|null>(null);
   const [busy,setBusy]=useState(false);
+  const [view,setView]=useState<'overview'|'ideation'>('overview');
   // Archive danger zone: modal visibility + mandatory acknowledgement checkbox.
   const [showArchive, setShowArchive] = useState(false);
   const [archiveChecked, setArchiveChecked] = useState(false);
@@ -108,6 +110,13 @@ export default function OrganizerHackathonDetail(){
       {actionMsg && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 flex gap-2"><CheckCircle2 size={16}/>{actionMsg}<button onClick={()=>setActionMsg(null)} className="ml-auto text-xs font-bold">×</button></div>}
       {actionErr && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 flex gap-2"><AlertCircle size={16}/>{actionErr}<button onClick={()=>setActionErr(null)} className="ml-auto text-xs font-bold">×</button></div>}
 
+      <div className="flex gap-1 rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-1 w-fit" role="tablist">
+        {([['overview','Overview',Layers],['ideation','AI Ideation',Sparkles]] as const).map(([value,label,Icon])=>(
+          <button key={value} role="tab" aria-selected={view===value} onClick={()=>setView(value)} className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold ${view===value?'bg-[#171a2d] text-white':'text-[#55586a] hover:bg-[#f4f1e8]'}`}><Icon size={14}/>{label}</button>
+        ))}
+      </div>
+
+      {view==='overview' ? (<>
       {/* Publish controls */}
       <Card className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2 text-xs">
@@ -282,6 +291,7 @@ export default function OrganizerHackathonDetail(){
           </div>
         </Card>
       </div>
+      </>) : <IdeationPanel hackathonId={id} status={hackathon.status}/>}
     </div>
   )
 }

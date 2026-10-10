@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { resolveSyncSecret } from '@hmt/config';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -20,6 +20,12 @@ export class SyncController {
   @UseGuards(SyncAuthGuard)
   async consume(@Body() event: unknown) {
     return this.sync.consume(event);
+  }
+
+  @Put('ideation/:hackathonId')
+  @UseGuards(SyncAuthGuard)
+  async ideation(@Param('hackathonId') hackathonId: string, @Body() config: unknown) {
+    return this.sync.setIdeation(hackathonId, config);
   }
 
   /** Batch consume (e.g. drained from organizer GET /sync/outbox). */

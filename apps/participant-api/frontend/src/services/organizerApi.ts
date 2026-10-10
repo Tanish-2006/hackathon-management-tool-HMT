@@ -266,6 +266,8 @@ export const organizerApi = {
   async transitionConfirm(id: string): Promise<any> { const res = await fetchOrganizer(`/hackathons/${id}/confirm`, { method: 'POST', body: JSON.stringify({}) }); return unwrapData<any>(res); },
   async transitionPublish(id: string): Promise<{ hackathon: any; publishedEvent: any }> { const res = await fetchOrganizer(`/hackathons/${id}/publish`, { method: 'POST', body: JSON.stringify({}) }); const d = unwrapData<any>(res); if (d?.hackathon) return d as any; return d as any; },
   async transitionArchive(id: string): Promise<any> { const res = await fetchOrganizer(`/hackathons/${id}/archive`, { method: 'POST', body: JSON.stringify({}) }); return unwrapData<any>(res); },
+  async getIdeation(id: string): Promise<OrganizerIdeationConfig> { const res = await fetchOrganizer(`/hackathons/${id}/ideation`); return unwrapData<OrganizerIdeationConfig>(res); },
+  async updateIdeation(id: string, config: OrganizerIdeationConfig): Promise<OrganizerIdeationConfig> { const res = await fetchOrganizer(`/hackathons/${id}/ideation`, { method: 'PUT', body: JSON.stringify(config) }); return unwrapData<OrganizerIdeationConfig>(res); },
   async directPublishBlocked(id: string): Promise<any> { return fetchOrganizer(`/hackathons/${id}/direct-publish`, { method: 'POST', body: JSON.stringify({}) }); },
 
   // ---------- Themes ----------
@@ -354,3 +356,6 @@ export function organizerErrorMessage(e: unknown): string {
 export function isOrganizerTokenReuse(e: unknown): boolean {
   return e instanceof OrganizerApiError && e.code === 'TOKEN_REUSE_DETECTED';
 }
+
+export type OrganizerIdeationRound = { title: string; goal: string; questions: string[]; exitCriteria: string };
+export type OrganizerIdeationConfig = { currentRound: number; rounds: OrganizerIdeationRound[]; extraInstructions?: string };

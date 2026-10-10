@@ -3,6 +3,7 @@ import { hackathonService } from './hackathon.service';
 import { draftInputSchema, manualCreateSchema, regenerateSectionSchema, updateSchema, wizardInputSchema } from './hackathon.schemas';
 import { createAuthGuard, getUser } from '../../shared/guards/auth.guard';
 import type { JwtConfig } from '@hmt/security';
+import { ideationConfigSchema } from '@hmt/contracts';
 
 export async function hackathonRoutes(app: FastifyInstance, opts: { jwtConfig: JwtConfig }) {
   const authGuard = createAuthGuard(opts.jwtConfig);
@@ -113,6 +114,31 @@ export async function hackathonRoutes(app: FastifyInstance, opts: { jwtConfig: J
       return reply.send({ data: updated });
     } catch (e: any) {
       return reply.status(e.statusCode ?? 500).send({ error: { code: 'UPDATE_FAILED', message: e.message } });
+    }
+  });
+
+  app.get('/hackathons/:id/ideation', { preHandler: [authGuard] }, async (req, reply) => {
+    const user = getUser(req as any);
+    const { id } = req.params as any;
+    try {
+      return reply.send({ data: await hackathonService.getIdeation(id, user.id) });
+    } catch (e: any) {
+      return reply.status(e.statusCode ?? 500).send({ error: { code: 'IDEATION_FAILED', message: e.message } });
+    }
+  });
+
+  app.put('/hackathons/:id/ideation', { preHandler: [authGuard] }, async (req, reply) => {
+    const user = getUser(req as any);
+    if (!['ORGANIZER', 'ADMIN'].includes(user.role)) return reply.status(403).send({ error: { code: 'FORBIDDEN', message: 'Only organizers can configure ideation' } });
+    const { id } = req.params as any;
+    const parsed = ideationConfigSchema.safeParse(req.body);
+    if (!parsed.success) return reply.status(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid ideation config', details: parsed.error.issues } });
+    try {
+      const ideation = await hackathonService.updateIdeation(id, user.id, parsed.data, { ip: (req as any).ip, requestId: (req as any).id });
+      return reply.send({ data: ideation });
+    } catch (e: any) {
+      const code = e.statusCode === 502 ? 'SYNC_FAILED' : 'IDEATION_FAILED';
+      return reply.status(e.statusCode ?? 500).send({ error: { code, message: e.message } });
     }
   });
 

@@ -4,6 +4,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
+import { PgMapStore } from '@hmt/common';
 
 /**
  * PrismaService — In-Memory Repository with optional Postgres delegation.
@@ -65,24 +66,30 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   private registrations = new Map<string, any>(); // registrationId -> { id, hackathonId, userId, status, ... }
   private consumedEvents = new Map<string, any>(); // eventId -> { eventId, hackathonId, consumedAt }
 
-  async   onModuleInit() {
-    const isProd = process.env.NODE_ENV === 'production';
-    const useRealDb = process.env.USE_REAL_DB === 'true';
-    if (isProd && !useRealDb) {
-      // Production must fail clearly instead of silently losing business state.
-      this.logger.error(
-        'PRODUCTION WARNING: PrismaService running on in-memory repository (USE_REAL_DB!=true). Business state will NOT persist across restarts. Set USE_REAL_DB=true with DATABASE_URL to enable Postgres persistence.',
-      );
-    } else {
-      this.logger.log(
-        'PrismaService initialized (in-memory repository). Set USE_REAL_DB=true to delegate to Postgres.',
-      );
+  private stateStore: PgMapStore | null = null;
+
+  async onModuleInit() {
+    const url = process.env.DATABASE_URL;
+    const persist = process.env.NODE_ENV === 'production' || process.env.PERSIST_STATE === 'true';
+    if (!persist) {
+      this.logger.log('PrismaService running in-memory (set PERSIST_STATE=true to persist to Postgres).');
+      return;
     }
+    if (!url) throw new Error('DATABASE_URL is required to persist participant state');
+    const store = new PgMapStore(url, 'participant', 1000, (error) =>
+      this.logger.error(`State flush failed: ${String(error)}`),
+    );
+    const maps = Object.entries(this).filter(
+      (entry): entry is [string, Map<string, unknown>] => entry[1] instanceof Map,
+    );
+    for (const [name, map] of maps) await store.attachMap(name, map);
+    store.start();
+    this.stateStore = store;
+    this.logger.log(`PrismaService persisting ${maps.length} collections to Postgres`);
   }
+
   async onModuleDestroy() {
-    this.users.clear();
-    this.profiles.clear();
-    this.tokens.clear();
+    await this.stateStore?.close();
   }
 
   // ---------- User ----------
@@ -163,7 +170,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
           role: data.role || 'PARTICIPANT',
           isEmailVerified: false,
           phoneNumber: data.phoneNumber ?? null,
-          isPhoneVerified: false,
+          isPhoneVerified: data.isPhoneVerified ?? false,
           createdAt: new Date(),
           updatedAt: new Date(),
         };
