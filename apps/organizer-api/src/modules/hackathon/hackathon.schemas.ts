@@ -8,10 +8,10 @@ export const draftInputSchema = z.object({
   mode: z.enum(['ONLINE', 'OFFLINE', 'HYBRID']),
   themePreference: z.string().min(1),
   problemStatementBasedOrOpenInnovation: z.enum(['PROBLEM_STATEMENT_BASED', 'OPEN_INNOVATION', 'HYBRID']),
-  expectedOutcomes: z.string().min(1),
-  judgingPreferences: z.string().min(1),
-  resources: z.string().min(1),
-  rules: z.string().min(1),
+  expectedOutcomes: z.string().default(''),
+  judgingPreferences: z.string().default(''),
+  resources: z.string().default(''),
+  rules: z.string().default(''),
 });
 
 // ---- Quick-create wizard: organizer answers 5 questions; AI drafts the rest ----
