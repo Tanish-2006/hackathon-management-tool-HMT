@@ -31,17 +31,15 @@ describe('AI Teammate hackathon scope', () => {
     expect(read('apps/participant-api/frontend/src/pages/participant/ai-helper.tsx')).toContain('useHackathonContext');
   });
 
-  it('My Hackathons links to the hackathon-specific AI destination', () => {
+  it('My Hackathons links to the AI Helper scoped to that hackathon', () => {
     const mine = read('apps/participant-api/frontend/src/pages/participant/my-hackathons.tsx');
-    expect(mine).toContain('/participant/my-hackathons/${r.id}/ai');
+    expect(mine).toContain('/participant/ai-helper?hackathon=${r.id}');
     expect(mine).not.toContain('href="/participant/ai"');
-    // availability is scoped per hackathon, not global first hit
-    expect(mine).toContain('getAiAccessStatus(undefined, r.id)');
   });
 
-  it('dashboard Ask AI targets the registered hackathon workspace', () => {
+  it('dashboard AI Helper link targets the registered hackathon', () => {
     const dash = read('apps/participant-api/frontend/src/pages/participant/dashboard.tsx');
-    expect(dash).toContain('/participant/my-hackathons/${hackathon.id}/ai');
+    expect(dash).toContain('/participant/ai-helper?hackathon=${hackathon.id}');
     expect(dash).not.toContain('href="/participant/ai"');
   });
 
