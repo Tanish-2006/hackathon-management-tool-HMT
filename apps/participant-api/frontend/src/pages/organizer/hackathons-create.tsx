@@ -213,10 +213,6 @@ export default function OrganizerHackathonsCreate(){
   function aiMissing(): string[] {
     const missing = step1Missing();
     if (!form.themePreference.trim()) missing.push('Theme preference');
-    if (!form.expectedOutcomes.trim()) missing.push('Expected outcomes');
-    if (!form.judgingPreferences.trim()) missing.push('Judging preferences');
-    if (!form.resources.trim()) missing.push('Resources');
-    if (!form.rules.trim()) missing.push('Rules');
     return missing;
   }
 
@@ -476,6 +472,12 @@ export default function OrganizerHackathonsCreate(){
       else setError('Your session has expired. Please log in again.');
     } finally{ setLoading(false); busyRef.current = false; }
   }
+  async function selectType(type:'PROBLEM_STATEMENT_BASED'|'OPEN_INNOVATION'){
+    update('hackathonType', type);
+    if (!hackathonId) return;
+    try { setHackathon(await organizerApi.updateHackathon(hackathonId, { hackathonType: type })); }
+    catch (err:any) { setError(`Unable to save the hackathon type: ${err?.message || 'request failed'}`); }
+  }
   async function transition(target:'review'|'confirm'|'publish'|'archive'){
     if(!hackathonId){ setError(CREATE_FIRST_MSG); return }
     setLoading(true); setError(null);
@@ -538,7 +540,7 @@ export default function OrganizerHackathonsCreate(){
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Field label="Expected outcomes"><input value={form.expectedOutcomes} onChange={e=>update('expectedOutcomes',e.target.value)} className="hmt-input" placeholder="e.g. Prototype, Pitch deck"/></Field>
                     <Field label="Judging preferences"><input value={form.judgingPreferences} onChange={e=>update('judgingPreferences',e.target.value)} className="hmt-input" placeholder="e.g. Originality, Impact"/></Field>
-                    <Field label="Theme preference"><input value={form.themePreference} onChange={e=>update('themePreference',e.target.value)} className="hmt-input" placeholder="e.g. Sustainability"/></Field>
+                    <Field label="Theme preference" required><input value={form.themePreference} onChange={e=>update('themePreference',e.target.value)} className="hmt-input" placeholder="e.g. Sustainability"/></Field>
                     <Field label="Resources"><input value={form.resources} onChange={e=>update('resources',e.target.value)} className="hmt-input" placeholder="e.g. Mentors, Starter kit"/></Field>
                   </div>
                   <Field label="Rules"><input value={form.rules} onChange={e=>update('rules',e.target.value)} className="hmt-input" placeholder="e.g. Teams of up to 4, Original work only"/></Field>
@@ -553,7 +555,7 @@ export default function OrganizerHackathonsCreate(){
                       { id:'PROBLEM_STATEMENT_BASED', title:'Problem statement', desc:'Participants solve a specific problem you define.' },
                       { id:'OPEN_INNOVATION', title:'Open innovation', desc:'Participants bring their own ideas within your themes.' },
                     ].map(opt=>(
-                      <button key={opt.id} onClick={()=>update('hackathonType',opt.id)} className={`text-left rounded-2xl border p-5 ${form.hackathonType===opt.id?'border-[#f26a4f] bg-[#fff6f3]':'border-[#e5e1d7] bg-white hover:border-[#f26a4f]/40'}`}>
+                      <button key={opt.id} onClick={()=>selectType(opt.id as 'PROBLEM_STATEMENT_BASED'|'OPEN_INNOVATION')} className={`text-left rounded-2xl border p-5 ${form.hackathonType===opt.id?'border-[#f26a4f] bg-[#fff6f3]':'border-[#e5e1d7] bg-white hover:border-[#f26a4f]/40'}`}>
                         <div className="font-bold">{opt.title}</div><p className="mt-1 text-xs leading-5 text-[#77798a]">{opt.desc}</p>
                         {form.hackathonType===opt.id && <span className="mt-3 inline-flex rounded-full bg-[#f26a4f] px-2 py-1 text-[10px] font-bold text-white">Selected</span>}
                       </button>
