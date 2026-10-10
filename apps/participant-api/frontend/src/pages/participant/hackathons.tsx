@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'wouter';
-import { ArrowRight, Calendar, Search, Loader2, AlertCircle, ShieldCheck, Megaphone, Clock3, Users, Trophy } from 'lucide-react';
+import { ArrowRight, Calendar, Search, Loader2, AlertCircle, ShieldCheck, Megaphone, Clock3, Users } from 'lucide-react';
 import { hmtBackendService, ApiError } from '@/services/backendApi';
 import RegistrationForm from '@/pages/participant/registration-form';
 import { cn } from '@/lib/utils';
 
 function friendly(e:unknown){ return e instanceof ApiError ? e.message : (e as Error)?.message || 'Failed' }
 
-// Date + time for phase ranges (hour/minute precision — date-only hides
-// zero-duration/ordering problems the backend now guarantees against).
 function fmtDT(v: unknown){
   if(!v) return '—';
   const t = new Date(v as string);
@@ -23,8 +21,6 @@ function Badge({ children, tone='muted' }: any){
 
 const TABS = ['Overview','Challenge','Eligibility','Timeline','Rules','Resources','Prizes','Judging','FAQs'] as const;
 
-// Registration-closure display state (informational only — the backend
-// enforces the lock on every mutation using server time).
 function lockInfo(h: any): { locked: boolean; reason: string | null } {
   if (!h) return { locked: false, reason: null };
   if ((h.status ?? 'PUBLISHED') === 'ARCHIVED') {
@@ -70,25 +66,18 @@ export default function ParticipantHackathons(){
       const res = await hmtBackendService.listHackathons(params);
       let data = Array.isArray(res) ? res : (res.data ?? []);
       let total = res.pagination?.total ?? data.length;
-      // Self-healing sync: an empty published list usually means the organizer
-      // publish event never reached this read-model (push is best-effort).
-      // Pull the organizer outbox once per page load (server defaults,
-      // idempotent by eventId) and re-read with the SAME filters — never
-      // fabricates records. Fires even with search/filters active, because a
-      // typed-but-unmatched query is exactly the reported symptom.
       if(!data.length && !pulled){
         try{
           await hmtBackendService.pullSync();
           const retry = await hmtBackendService.listHackathons(params);
           data = Array.isArray(retry) ? retry : (retry.data ?? []);
           total = (retry as any)?.pagination?.total ?? data.length;
-        }catch{ /* keep honest empty state on failure */ }
+        }catch {}
         setPulled(true);
       }
       setRows(data);
       setTotal(total);
       if(data.length && !selectedId) setSelectedId(data[0].id);
-      // Registration state drives Register vs Registered CTA (real backend state).
       hmtBackendService.getMyRegistrations().then((regs:any)=>{
         const list = Array.isArray(regs)?regs:(regs?.data??[]);
         setRegisteredIds(new Set(list.map((r:any)=>String(r.hackathonId))));
@@ -103,8 +92,6 @@ export default function ParticipantHackathons(){
     let m=true;
     setDetailLoading(true);
     setDetailError(null);
-    // A failed detail fetch falls back to the list row (no phases/criteria),
-    // but the failure is surfaced instead of silently masked.
     hmtBackendService.getHackathonById(selectedId).then(d=>{ if(m){ setDetail(d); setTab('Overview'); setRegisterMsg(null);} }).catch((e:any)=>{ if(m){ setDetail(rows.find(r=>r.id===selectedId) ?? null); setDetailError(e?.message || 'Could not load full details.'); } }).finally(()=>{ if(m) setDetailLoading(false); });
     return ()=>{ m=false; };
   },[selectedId]);
@@ -115,8 +102,6 @@ export default function ParticipantHackathons(){
   const resources = selected?.resources ?? [];
   const anns = selected?.announcements ?? [];
 
-  // Panel state from live backend data (refreshed, never assumed):
-  // A unregistered, B registered-no-team, C in team, D locked.
   const isRegistered = !!selected && registeredIds.has(String(selected.id));
   const lock = lockInfo(selected);
   const [myTeamSelected,setMyTeamSelected]=useState<any|null>(null);
@@ -134,10 +119,8 @@ export default function ParticipantHackathons(){
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[selected?.id, registeredIds]);
 
-  const filteredHint = useMemo(()=> `${total} published hackathon${total===1?'':'s'}`,[total]);
+  const filteredHint = useMemo(()=> `${total} hackathon${total===1?'':'s'}`,[total]);
 
-  // Manual recovery: re-pull the organizer outbox on demand (idempotent,
-  // server defaults). Lets a published hackathon appear without recreating it.
   async function syncNow(){
     setSyncing(true); setSyncMsg(null);
     try{
@@ -145,7 +128,7 @@ export default function ParticipantHackathons(){
       const results = r?.results ?? [];
       const ok = results.filter((x:any)=>x?.ok).length;
       await load();
-      setSyncMsg(ok ? `Synced ${ok} published update${ok===1?'':'s'} from the organizer.` : 'Sync finished — no new published updates found.');
+      setSyncMsg(ok ? `Found ${ok} update${ok===1?'':'s'}.` : 'Nothing new yet.');
     }catch(e:any){
       setSyncMsg(friendly(e));
     }finally{
@@ -157,14 +140,13 @@ export default function ParticipantHackathons(){
     <div className="space-y-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Discover — Published only</div>
+          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Discover</div>
           <h1 className="mt-2 text-3xl font-bold tracking-[-.05em] text-[#171a2d]">Hackathons</h1>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-[#77798a]">Search the canonical published list. Drafts stay private to organizers. {filteredHint}.</p>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-[#77798a]">{filteredHint}.</p>
         </div>
         <Link href="/participant/my-hackathons" className="rounded-xl bg-[#171a2d] px-4 py-2 text-xs font-bold text-white">My Hackathons</Link>
       </div>
 
-      {/* Search + minimal filters (Unstop/Hack2Skill pattern) */}
       <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-4">
         <div className="flex flex-col gap-3 lg:flex-row">
           <label className="flex flex-1 items-center gap-2 rounded-xl border border-[#dedbd1] bg-white px-3 py-2">
@@ -195,11 +177,10 @@ export default function ParticipantHackathons(){
         </div>
       </div>
 
-      {loading ? <div className="flex items-center gap-2 text-sm text-[#77798a]"><Loader2 size={16} className="animate-spin"/> Loading published hackathons…</div>
+      {loading ? <div className="flex items-center gap-2 text-sm text-[#77798a]"><Loader2 size={16} className="animate-spin"/> Loading hackathons…</div>
       : error ? <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-700 flex gap-3"><AlertCircle size={18}/><div><b>Could not load hackathons</b><p className="mt-1">{error}</p><button onClick={load} className="mt-3 rounded-lg bg-[#171a2d] px-3 py-1.5 text-xs font-bold text-white">Retry</button></div></div>
       : (
       <div className="grid gap-6 lg:grid-cols-[.9fr_1.1fr]">
-        {/* Compact list rows (not card grid) */}
         <div className="overflow-hidden rounded-2xl border border-[#dedbd1] bg-[#fdfbf5]">
           <div className="border-b border-[#e5e1d7] px-4 py-3 font-mono text-[10px] uppercase tracking-[.14em] text-[#77798a]">Hackathon | Mode | Registration ends | Status | Action</div>
           {rows.length ? rows.map(r=>(
@@ -215,14 +196,13 @@ export default function ParticipantHackathons(){
               <ArrowRight size={15} className="shrink-0 text-[#77798a]"/>
             </button>
           )) : <div className="p-8 text-center text-sm text-[#77798a]">
-            <p>No published hackathons match. Try clearing filters.</p>
-            <p className="mx-auto mt-2 max-w-sm text-xs leading-5">If an organizer just published one, it may not have synced yet — pull the latest published updates (never creates or modifies anything).</p>
-            <button onClick={syncNow} disabled={syncing} className="mt-3 rounded-xl bg-[#171a2d] px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{syncing?'Syncing…':'Sync from organizer'}</button>
+            <p>No hackathons match. Try clearing filters.</p>
+            <p className="mx-auto mt-2 max-w-sm text-xs leading-5">Just published? It may take a moment to show up.</p>
+            <button onClick={syncNow} disabled={syncing} className="mt-3 rounded-xl bg-[#171a2d] px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{syncing?'Checking…':'Check for new hackathons'}</button>
             {syncMsg && <p className="mt-2 text-xs text-[#55586a]">{syncMsg}</p>}
           </div>}
         </div>
 
-        {/* Detail with tabs */}
         <div id="details" className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6">
           {detailLoading ? <div className="text-sm text-[#77798a]">Loading details…</div> : selected ? (
             <>
@@ -254,19 +234,14 @@ export default function ParticipantHackathons(){
                 {tab==='Resources' && <div className="grid gap-2">{resources.map((r:any,i:number)=><a key={i} href={r.url} target="_blank" rel="noreferrer" className="rounded-xl border border-[#dedbd1] px-3 py-2 text-xs hover:bg-[#f4f1e8]">{r.name ?? r.title}</a>)}</div>}
                 {tab==='Prizes' && <p className="text-[#77798a]">Prizes announced by organizer{selected.prizes?`: ${(selected.prizes as any[]).map((p:any)=>p.title).join(', ')}`:'.'}</p>}
                 {tab==='Judging' && <div className="space-y-2">{criteria.map((c:any,i:number)=><div key={i} className="flex justify-between rounded-xl bg-[#f4f1e8] px-3 py-2 text-xs"><span>{c.name}</span><span className="font-mono font-bold">{c.weight?Math.round(c.weight*100)+'%':'—'}</span></div>)}</div>}
-                {tab==='FAQs' && <p className="text-[#77798a]">FAQs published by organizer appear here.</p>}
+                {tab==='FAQs' && <p className="text-[#77798a]">No FAQs yet.</p>}
               </div>
               {!!anns.length && (
                 <div className="mt-6 rounded-2xl bg-[#171a2d] p-4 text-[#fdfbf5]">
-                  <div className="font-mono text-[10px] uppercase tracking-[.16em] text-[#d8e35b] flex items-center gap-2"><Megaphone size={13}/> Announcements — published only</div>
+                  <div className="font-mono text-[10px] uppercase tracking-[.16em] text-[#d8e35b] flex items-center gap-2"><Megaphone size={13}/> Announcements</div>
                   <div className="mt-2 space-y-2">{anns.slice(0,3).map((a:any)=><div key={a.id} className="rounded-xl bg-[#252941] p-3 text-xs"><b>{a.title}</b><p className="text-[#b9bdca]">{a.content}</p></div>)}</div>
                 </div>
               )}
-              {/* Registration — visually separated action section (not an info tab),
-                  always last in the details card, after every informational section.
-                  State A (unregistered): form. State B (registered, no team):
-                  team choice. State C (in team): manage. State D (locked):
-                  closed status. Membership re-read from the backend. */}
               <div className="mt-6 rounded-2xl border-2 border-[#171a2d] bg-[#fffdf5] p-4">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-sm font-bold"><ShieldCheck size={15} className="text-[#f26a4f]"/> Registration</div>
@@ -285,7 +260,7 @@ export default function ParticipantHackathons(){
                   <div className="mt-3">
                     <RegistrationForm
                       hackathon={selected}
-                      onRegistered={(id)=>{ setRegisteredIds((prev)=> new Set(prev).add(id)); setRegisterMsg('Registered — continue to team choice.'); refreshSelectedTeam(); }}
+                      onRegistered={(id)=>{ setRegisteredIds((prev)=> new Set(prev).add(id)); setRegisterMsg('You are registered. Next, create or join a team.'); refreshSelectedTeam(); }}
                     />
                   </div>
                 ) : myTeamSelected ? (
@@ -315,7 +290,7 @@ export default function ParticipantHackathons(){
                   </div>
                 )}
                 {registerMsg && <p className="mt-2 text-xs text-[#55586a]">{registerMsg}</p>}
-                <div className="mt-3 flex items-center gap-2 text-[11px] text-[#77798a]"><Clock3 size={12}/> Registration ends: {selected.registrationEnd?new Date(selected.registrationEnd).toLocaleString():'see timeline'} · <Trophy size={12}/> Team choice after confirm → My Hackathons</div>
+                <div className="mt-3 flex items-center gap-2 text-[11px] text-[#77798a]"><Clock3 size={12}/> Registration ends: {selected.registrationEnd?new Date(selected.registrationEnd).toLocaleString():'see timeline'}</div>
               </div>
             </>
           ) : <div className="text-sm text-[#77798a]">Select a hackathon to see details.</div>}

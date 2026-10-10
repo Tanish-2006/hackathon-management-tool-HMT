@@ -20,16 +20,11 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
   const [team,setTeam]=useState<any>(null);
   const [readme,setReadme]=useState<string|null>(null);
   const [relevant,setRelevant]=useState<any[]>([]);
-  const [scope,setScope]=useState<string>('TARGETED');
   const [grant,setGrant]=useState<any>(null);
   const [aiAccess,setAiAccess]=useState<any>(null);
   const [showAnalysis,setShowAnalysis]=useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
-  // Hackathon-scoped context. Inside a hackathon workspace the route supplies
-  // hackathonId as the authority (never the global selector) so switching
-  // hackathons can never carry over the previous team/project/history.
-  // Standalone use (legacy) falls back to the shared persisted selection.
   const ctx = useHackathonContext();
   const scoped = !!hackathonId;
   const contextId = scoped ? String(hackathonId) : ctx.selectedId;
@@ -37,11 +32,9 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
   useEffect(()=>{ endRef.current?.scrollIntoView({ behavior:'smooth' }); },[messages]);
 
   useEffect(()=>{
-    // Switching hackathons must never show the previous workspace's team,
-    // project, grant, history, or retrieval preview.
     setProject(null); setTeam(null); setGrant(null); setAiAccess(null);
     setConversations([]); setActiveId(null); setMessages([]);
-    setReadme(null); setRelevant([]); setScope('TARGETED'); setError(null);
+    setReadme(null); setRelevant([]); setError(null);
     if(!scoped && (ctx.loading || !contextId)) { setLoading(!ctx.loading); return; }
     if(scoped && !contextId) { setLoading(false); return; }
     let m=true;
@@ -60,14 +53,11 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
           proj = (p.value as any)?.project ?? p.value;
           if(proj?.id){ setProject(proj);
             try{ const st = await hmtBackendService.checkRepositoryAccess(proj.id); if(m) setGrant(st as any);
-              // fetch a chat without grant to capture retrieval preview if any?
             }catch{}
           }
         }
         if(t.status==='fulfilled'){ const tm=(t.value as any)?.team ?? t.value; if(tm?.id && (!tm.hackathonId || String(tm.hackathonId)===String(contextId))) setTeam(tm); else if((t.value as any)?.id && (!(t.value as any)?.hackathonId || String((t.value as any).hackathonId)===String(contextId))) setTeam(t.value); }
-        try{ const acc = await hmtBackendService.getAiAccessStatus(proj?.id ?? undefined, contextId ?? undefined); if(m) setAiAccess(acc); }catch{ /* locked */ }
-        // History is scoped to this hackathon's project: without a project,
-        // the workspace shows no conversations (never another team's).
+        try{ const acc = await hmtBackendService.getAiAccessStatus(proj?.id ?? undefined, contextId ?? undefined); if(m) setAiAccess(acc); }catch {}
         try{
           const c:any = proj?.id
             ? await hmtBackendService.getAIConversations(proj.id, contextId ?? undefined)
@@ -91,7 +81,6 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
       if(!m) return;
       const msgs = res?.messages || res?.conversation?.messages || [];
       setMessages(msgs);
-      if(res?.aiContext) {/* use */}
     }).catch(e=> setError(friendly(e)));
     return ()=>{m=false}
   },[activeId]);
@@ -107,23 +96,17 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
     try{
       if(activeId){
         const res:any = await hmtBackendService.postAIConversationMessage(activeId, trimmed, project?.id, contextId ?? undefined);
-        // res may contain answer + recommendations + hadRepositoryAccess
         const assistant = { role:'ASSISTANT', content: res?.answer || res?.content || 'Hint received.', createdAt: new Date().toISOString(), meta: res };
         setMessages(prev=>[...prev, assistant]);
         if(res?.relevantFiles) setRelevant(res.relevantFiles);
-        if(res?.hadRepositoryAccess!==undefined) setScope(res.hadRepositoryAccess ? 'TARGETED + GRANTED' : 'LIMITED — NO GRANT');
-        // update readme/relevant preview if returned
         if(res?.readmeContext) setReadme(res.readmeContext);
       } else {
-        // create conversation first
         const created:any = await hmtBackendService.createAIConversation({ title: trimmed.slice(0,40), initialMessage: trimmed, projectId: project?.id, hackathonId: contextId ?? undefined });
         const conv = created?.conversation || created;
         const msgs = created?.messages || [];
         setConversations(prev=> [conv, ...prev]);
         setActiveId(conv.id);
         setMessages(msgs);
-        if(created?.aiContext) setScope(created.aiContext.hadRepositoryAccess ? 'GRANTED' : 'NO GRANT');
-        // if created doesn't have messages, fallback to ask
         if(msgs.length===0){
           const res:any = await hmtBackendService.askAITeammate(trimmed, { projectId: project?.id, hackathonId: contextId ?? undefined });
           setMessages([{ role:'USER', content: trimmed } as any, { role:'ASSISTANT', content: res?.answer || 'Hint received.', meta: res } as any]);
@@ -145,7 +128,7 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
   }
 
   const hasGrant = !!grant?.hasAccess;
-  const grantStatusLabel = hasGrant ? 'GRANTED' : 'NO GRANT';
+  const grantStatusLabel = hasGrant ? 'Access granted' : 'No access';
   const grantTone = hasGrant ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-amber-100 text-amber-700 border-amber-200';
 
   if(loading) return <div className="space-y-4"><div className="h-24 animate-pulse rounded-2xl bg-[#e9e5da]"/><div className="h-[520px] animate-pulse rounded-2xl bg-[#e9e5da]"/></div>
@@ -154,20 +137,18 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
     <div className="space-y-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">AI teammate workspace · hints only</div>
-          <h1 className="mt-2 text-3xl font-bold tracking-[-.05em] text-[#171a2d]">Think with the machine, ship like a human.</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#77798a]">Get prioritized guidance — never generated code. AI sees only what your grant allows. Read-only retrieval: README + relevant files.</p>
+          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">AI teammate</div>
+          <h1 className="mt-2 text-3xl font-bold tracking-[-.05em] text-[#171a2d]">Get unstuck, keep building.</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#77798a]">Ask for hints and next steps. It guides you rather than writing code for you.</p>
         </div>
         <div className="flex items-center gap-2">
-          <span className={`rounded-full border px-3 py-1.5 text-[11px] font-bold ${grantTone}`}>{hasGrant? <span className="inline-flex items-center gap-1"><Unlock size={12}/> GRANTED</span> : <span className="inline-flex items-center gap-1"><Lock size={12}/> NO GRANT</span>}</span>
-          <span className="rounded-full bg-[#171a2d] px-3 py-1.5 text-[11px] font-bold text-white">{scope}</span>
+          <span className={`rounded-full border px-3 py-1.5 text-[11px] font-bold ${grantTone}`}>{hasGrant? <span className="inline-flex items-center gap-1"><Unlock size={12}/> Repo access</span> : <span className="inline-flex items-center gap-1"><Lock size={12}/> No repo access</span>}</span>
         </div>
       </div>
 
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex gap-2"><AlertCircle size={16}/>{error}<button onClick={()=>setError(null)} className="ml-auto"><X size={14}/></button></div>}
       {success && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 flex gap-2"><CheckCircle2 size={16}/>{success}<button onClick={()=>setSuccess(null)} className="ml-auto"><X size={14}/></button></div>}
 
-      {/* Hackathon context: AI answers are scoped to one hackathon's project */}
       <div className="rounded-xl border border-[#dedbd1] bg-[#f4f1e8] px-4 py-2.5 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
         {scoped ? (
           <>
@@ -182,9 +163,9 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
             <a href="/participant/my-hackathons" className="text-xs font-bold text-[#171a2d] underline">Switch hackathon</a>
           </>
         ) : ctx.loading ? (
-          <span className="text-xs text-[#77798a]">Loading hackathon context…</span>
+          <span className="text-xs text-[#77798a]">Loading…</span>
         ) : !contextId ? (
-          <span className="text-xs text-[#55586a]">No hackathon context — <a href="/participant/hackathons" className="font-bold underline">register in Discover</a> to scope AI to your project.</span>
+          <span className="text-xs text-[#55586a]"><a href="/participant/hackathons" className="font-bold underline">Register for a hackathon</a> to use the AI teammate.</span>
         ) : (
           <>
             <label className="flex items-center gap-2 text-xs font-semibold text-[#55586a]">Hackathon
@@ -192,13 +173,13 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
                 value={contextId}
                 onChange={e=>ctx.select(e.target.value || null)}
                 className="rounded-lg border border-[#dedbd1] bg-white px-2 py-1.5 text-xs font-bold text-[#171a2d] outline-none"
-                aria-label="Select hackathon context"
+                aria-label="Select hackathon"
               >
                 {ctx.options.map(o=><option key={o.id} value={o.id}>{o.title}{o.registered?'':' (not registered)'}</option>)}
               </select>
             </label>
             {!ctx.selectedIsRegistered && (
-              <span className="text-xs text-[#55586a]">Not registered here — grant-gated analysis unlocks after registration.</span>
+              <span className="text-xs text-[#55586a]">Register for this hackathon to use the AI teammate.</span>
             )}
           </>
         )}
@@ -207,7 +188,7 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
       {scoped && !loading && !hackathon && (
         <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-4 text-sm text-[#55586a]">
           <b className="text-[#171a2d]">Not registered for this hackathon.</b>
-          <p className="mt-1 leading-5">AI Teammate lives inside a registered hackathon workspace. <a href="/participant/hackathons" className="font-bold underline">Discover hackathons</a> to register, or <a href="/participant/my-hackathons" className="font-bold underline">open My Hackathons</a>.</p>
+          <p className="mt-1 leading-5"><a href="/participant/hackathons" className="font-bold underline">Discover hackathons</a> to register, or <a href="/participant/my-hackathons" className="font-bold underline">open My Hackathons</a>.</p>
         </div>
       )}
       {scoped && !loading && hackathon && !team?.id && (
@@ -219,7 +200,7 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
       {scoped && !loading && team?.id && !project?.id && (
         <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-4 text-sm text-[#55586a]">
           <b className="text-[#171a2d]">No project yet for {team?.name || 'your team'}.</b>
-          <p className="mt-1 leading-5">Create the team project to scope AI answers. <a href="/participant/projects" className="font-bold underline">Open My Project</a>.</p>
+          <p className="mt-1 leading-5">Create your team's project first. <a href="/participant/projects" className="font-bold underline">Open My Project</a>.</p>
         </div>
       )}
 
@@ -227,8 +208,8 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
         <div className="rounded-2xl border border-[#171a2d] bg-[#171a2d] p-4 flex gap-3 text-[#fdfbf5]">
           <Lock size={18} className="text-[#d8e35b] mt-0.5"/>
           <div className="text-sm">
-            <b>AI Teammate LOCKED — {aiAccess.derivedStatus ?? aiAccess.code}</b>
-            <p className="mt-1 leading-5 text-[#b9bdca]">{aiAccess.message} Backend enforces the live window; frontend hiding alone is never enough.</p>
+            <b>AI teammate is not available right now</b>
+            <p className="mt-1 leading-5 text-[#b9bdca]">{aiAccess.message}</p>
           </div>
         </div>
       )}
@@ -236,15 +217,14 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 flex gap-3">
           <ShieldAlert size={18} className="text-amber-600 mt-0.5"/>
           <div className="text-sm">
-            <b className="text-amber-800">AI deep repo analysis disabled — no grant.</b>
-            <p className="mt-1 text-amber-700 leading-5">Your leader must connect a repository and grant AI access. Without it, AI sees only hackathon + README + public project metadata and will tell you it has limited context. Revoked grants immediately deny retrieval.</p>
-            <a href="/participant/github" className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-[#171a2d] underline">Go to GitHub → grant <ChevronRight size={12}/></a>
+            <b className="text-amber-800">The AI can't see your code yet.</b>
+            <p className="mt-1 text-amber-700 leading-5">Your team leader can connect a repository and give the AI access. Until then it only knows your hackathon and project details.</p>
+            <a href="/participant/github" className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-[#171a2d] underline">Connect a repository <ChevronRight size={12}/></a>
           </div>
         </div>
       )}
 
       <div className="grid gap-4 lg:grid-cols-[280px_1fr_300px] h-[640px]">
-        {/* Left: history */}
         <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] flex flex-col overflow-hidden">
           <div className="p-4 border-b border-[#e5e1d7] flex items-center justify-between">
             <h3 className="text-xs font-bold flex items-center gap-2"><History size={14}/> History</h3>
@@ -261,7 +241,6 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
           <div className="p-3 border-t border-[#e5e1d7] bg-[#f4f1e8] text-[11px] text-[#77798a]">{conversations.length} conversations</div>
         </div>
 
-        {/* Center: chat */}
         <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] flex flex-col overflow-hidden">
           <div className="h-12 border-b border-[#e5e1d7] flex items-center justify-between px-4 bg-white">
             <div className="flex items-center gap-2 text-xs font-bold"><Brain size={14} className="text-[#f26a4f]"/> {activeId ? 'Chat' : 'New conversation'} <span className="rounded-full bg-[#f4f1e8] px-2 py-1 text-[10px]">{hasGrant ? 'With repo context' : 'Limited context'}</span></div>
@@ -272,9 +251,9 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
             {messages.length===0 && (
               <div className="space-y-3">
                 <div className="rounded-2xl bg-[#171a2d] p-5 text-[#fdfbf5]">
-                  <div className="font-mono text-[10px] uppercase tracking-[.16em] text-[#d8e35b]">AI teammate · Hints only, no code generation</div>
+                  <div className="font-mono text-[10px] uppercase tracking-[.16em] text-[#d8e35b]">AI teammate</div>
                   <h3 className="mt-2 text-lg font-bold">How can we help you ship faster?</h3>
-                  <p className="mt-1 text-xs leading-5 text-[#b9bdca]">Ask about architecture, testing, security, or next steps. We never write code — only guide.</p>
+                  <p className="mt-1 text-xs leading-5 text-[#b9bdca]">Ask about your approach, risks, or what to do next.</p>
                   <div className="mt-4 grid gap-2">
                     {[
                       'How should we prioritize the next 6 hours?',
@@ -286,7 +265,7 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
                     ))}
                   </div>
                 </div>
-                <div className="rounded-xl border border-dashed border-[#dedbd1] p-3 text-xs leading-5 text-[#77798a]"><Layers size={14} className="inline mr-1"/> Retrieval: README.md + up to 3 relevant files, targeted by your question. Scope = <code className="rounded bg-[#f4f1e8] px-1">{scope}</code></div>
+                <div className="rounded-xl border border-dashed border-[#dedbd1] p-3 text-xs leading-5 text-[#77798a]"><Layers size={14} className="inline mr-1"/> The AI reads your README and the files most relevant to your question.</div>
               </div>
             )}
 
@@ -294,25 +273,24 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
               <motion.div key={i} initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} className={`max-w-[86%] rounded-2xl px-4 py-3 text-sm leading-6 ${m.role==='USER' ? 'ml-auto bg-[#171a2d] text-white' : m.isError ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-white border border-[#e5e1d7] text-[#171a2d]'}`}>
                 <div className="whitespace-pre-wrap">{m.content}</div>
                 {m.meta?.recommendations && <div className="mt-3 grid gap-2">{m.meta.recommendations.slice(0,3).map((r:any,idx:number)=><div key={idx} className="rounded-xl bg-[#f4f1e8] p-2.5 text-xs"><div className="font-bold">{r.title}</div><div className="text-[#77798a]">{r.action}</div><div className="mt-1 inline-flex rounded-full bg-[#d8e35b] px-2 py-0.5 text-[10px] font-bold">{r.category} · {r.impact}</div></div>)}</div>}
-                {m.meta?.privacyEnforced && <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-[11px] font-bold text-amber-700"><Lock size={12}/> Privacy enforced — limited context</div>}
+                {m.meta?.privacyEnforced && <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-[11px] font-bold text-amber-700"><Lock size={12}/> Limited context</div>}
                 <div className="mt-1 text-[11px] font-mono opacity-50">{m.createdAt ? new Date(m.createdAt).toLocaleTimeString(): ''}</div>
               </motion.div>
             ))}
-            {sending && <div className="flex items-center gap-2 text-xs text-[#77798a]"><Loader2 size={14} className="animate-spin"/> AI is retrieving & thinking…</div>}
+            {sending && <div className="flex items-center gap-2 text-xs text-[#77798a]"><Loader2 size={14} className="animate-spin"/> Thinking…</div>}
             <div ref={endRef}/>
           </div>
 
           <form onSubmit={handleSend} className="p-3 border-t border-[#e5e1d7] bg-white flex gap-2">
-            <input value={input} onChange={e=>setInput(e.target.value)} placeholder={hasGrant ? "Ask for hints — with repo context…" : "Ask for hints — limited context (no grant)…"} className="flex-1 rounded-xl border border-[#dedbd1] px-3 py-2.5 text-sm outline-none focus:border-[#f26a4f]"/>
+            <input value={input} onChange={e=>setInput(e.target.value)} placeholder="Ask a question…" className="flex-1 rounded-xl border border-[#dedbd1] px-3 py-2.5 text-sm outline-none focus:border-[#f26a4f]"/>
             <button disabled={sending || !input.trim()} className="rounded-xl bg-[#f26a4f] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50 inline-flex items-center gap-2"><Send size={16}/> Send</button>
           </form>
         </div>
 
-        {/* Right: analysis context */}
         <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] flex flex-col overflow-hidden">
           <div className="p-4 border-b border-[#e5e1d7]">
             <h3 className="text-xs font-bold flex items-center gap-2"><Eye size={14}/> Analysis context</h3>
-            <p className="mt-1 text-[11px] leading-4 text-[#77798a]">What AI actually sees for this prompt.</p>
+            <p className="mt-1 text-[11px] leading-4 text-[#77798a]">What the AI can see.</p>
           </div>
           <div className="flex-1 overflow-auto p-4 space-y-4">
             <div className="rounded-xl bg-[#f4f1e8] p-3">
@@ -324,23 +302,21 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
 
             <div className="rounded-xl border border-[#e5e1d7] p-3">
               <div className="text-xs font-bold">README context</div>
-              {readme ? <pre className="mt-2 max-h-32 overflow-auto rounded-lg bg-[#171a2d] p-2 text-[11px] leading-4 text-[#fdfbf5] whitespace-pre-wrap">{readme.slice(0,800)}</pre> : <div className="mt-2 rounded-lg bg-[#f4f1e8] p-3 text-xs text-[#77798a]">{hasGrant ? 'Will be retrieved per question.' : 'No grant — README retrieval is limited and not persisted as deep context.'}</div>}
+              {readme ? <pre className="mt-2 max-h-32 overflow-auto rounded-lg bg-[#171a2d] p-2 text-[11px] leading-4 text-[#fdfbf5] whitespace-pre-wrap">{readme.slice(0,800)}</pre> : <div className="mt-2 rounded-lg bg-[#f4f1e8] p-3 text-xs text-[#77798a]">{hasGrant ? 'Will be retrieved per question.' : 'Not available until your team leader gives the AI access.'}</div>}
             </div>
 
             <div className="rounded-xl border border-[#e5e1d7] p-3">
-              <div className="text-xs font-bold">Relevant files · Retrieval scope</div>
-              <div className="mt-1 text-[11px] font-mono text-[#77798a]">Scope: {scope} · Budget: targeted (≤3 files)</div>
+              <div className="text-xs font-bold">Relevant files</div>
               <div className="mt-2 space-y-1.5">
-                {relevant.length ? relevant.map((f:any,i:number)=><div key={i} className="rounded-lg bg-[#f4f1e8] px-2.5 py-2 text-xs"><div className="font-mono text-[11px] font-bold">{f.path}</div><div className="text-[#77798a] line-clamp-2">{f.retrievalReason || f.reason || 'Targeted retrieval'}</div></div>) : <div className="rounded-lg bg-[#f4f1e8] p-2.5 text-xs text-[#77798a]">No files yet — ask a question to trigger targeted retrieval.</div>}
+                {relevant.length ? relevant.map((f:any,i:number)=><div key={i} className="rounded-lg bg-[#f4f1e8] px-2.5 py-2 text-xs"><div className="font-mono text-[11px] font-bold">{f.path}</div><div className="text-[#77798a] line-clamp-2">{f.retrievalReason || f.reason || ''}</div></div>) : <div className="rounded-lg bg-[#f4f1e8] p-2.5 text-xs text-[#77798a]">Ask a question to see which files the AI used.</div>}
               </div>
-              <div className="mt-3 rounded-lg border border-dashed border-[#dedbd1] p-2.5 text-[11px] leading-4 text-[#77798a]">Hints only — AI never generates code. If revoked, retrieval returns 403 and we show “revoked” badge.</div>
             </div>
 
             <div className="rounded-xl bg-[#171a2d] p-3 text-[#fdfbf5]">
-              <div className="text-xs font-bold text-[#d8e35b]">Grant status</div>
-              <div className="mt-2 flex items-center gap-2 text-xs"><span className={`rounded-full px-2 py-1 text-[11px] font-bold ${hasGrant?'bg-[#d8e35b] text-[#171a2d]':'bg-[#3a3e5a] text-[#9b9fb1]'}`}>{grantStatusLabel}</span><span className="text-[#9b9fb1]">{project?.id ? String(project.id).slice(0,8) : 'no project'}</span></div>
-              {!hasGrant && <p className="mt-2 text-xs leading-5 text-[#b9bdca]">Leader: connect repo in GitHub, then “Grant AI access”. Revoke immediately denies AI.</p>}
-              {hasGrant && <p className="mt-2 text-xs leading-5 text-[#b9bdca]">AI can view repo metadata + findings with retrieval. Tokens never displayed.</p>}
+              <div className="text-xs font-bold text-[#d8e35b]">Repository access</div>
+              <div className="mt-2 flex items-center gap-2 text-xs"><span className={`rounded-full px-2 py-1 text-[11px] font-bold ${hasGrant?'bg-[#d8e35b] text-[#171a2d]':'bg-[#3a3e5a] text-[#9b9fb1]'}`}>{grantStatusLabel}</span></div>
+              {!hasGrant && <p className="mt-2 text-xs leading-5 text-[#b9bdca]">Your team leader can grant access from the GitHub page.</p>}
+              {hasGrant && <p className="mt-2 text-xs leading-5 text-[#b9bdca]">The AI can read your repository.</p>}
             </div>
           </div>
         </div>

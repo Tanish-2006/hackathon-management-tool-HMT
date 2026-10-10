@@ -1,9 +1,6 @@
-// Centralized auth state — backend is the source of truth for identity + role.
-// Startup flow: initialize -> validate token via /auth/me -> populate user -> render guards.
-// Never falls back to a demo role. Invalid/expired session clears state -> login.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { hmtBackendService, clearAuthTokens, getStoredAccessToken, type MeResponse } from '@/services/backendApi';
+import { hmtBackendService, clearAuthTokens, getSessionApi, getStoredAccessToken, markSessionApi, type AuthApi } from '@/services/backendApi';
 import { organizerApi } from '@/services/organizerApi';
 
 export type HmtRole = 'PARTICIPANT' | 'ORGANIZER' | 'MENTOR' | 'ADMIN';
@@ -17,7 +14,7 @@ export interface AuthUser {
   phoneNumber?: string | null;
   isPhoneVerified?: boolean;
   raw: any;
-  source: 'participant' | 'organizer';
+  source: AuthApi;
 }
 
 interface AuthState {
@@ -37,7 +34,7 @@ function normalizeRole(r: unknown): HmtRole | null {
   return null;
 }
 
-function toAuthUser(me: any, source: 'participant' | 'organizer'): AuthUser | null {
+function toAuthUser(me: any, source: AuthApi): AuthUser | null {
   if (!me) return null;
   const role = normalizeRole(me.role ?? me.user?.role);
   if (!role) return null;
@@ -57,40 +54,34 @@ function toAuthUser(me: any, source: 'participant' | 'organizer'): AuthUser | nu
   };
 }
 
-async function fetchSessionUser(): Promise<AuthUser | null> {
-  // Prefer participant API (canonical identity), fall back to organizer API.
-  // Both use the shared hmt_access_token key; backend validates signature + role.
+const sessionClients = { participant: hmtBackendService, organizer: organizerApi };
+
+async function loadSessionUser(api: AuthApi): Promise<AuthUser | null> {
+  return toAuthUser(await sessionClients[api].getMe(), api);
+}
+
+async function probeLegacySession(api: AuthApi): Promise<AuthUser | null> {
   try {
-    const me = await hmtBackendService.getMe();
-    const u = toAuthUser(me as any, 'participant');
-    if (u) return u;
+    return await loadSessionUser(api);
   } catch (e: any) {
-    const status = e?.status;
-    // On 401 try a single refresh before giving up (expired access token path).
-    if (status === 401 && !String(e?.message || '').includes('reuse')) {
-      try {
-        await hmtBackendService.refresh();
-        const me = await hmtBackendService.getMe();
-        const u = toAuthUser(me as any, 'participant');
-        if (u) return u;
-      } catch { /* fall through to organizer check */ }
-    } else if (status !== 401 && status !== 403 && status !== 0) {
-      // Non-auth error (e.g. 500) — do not silently clear; let caller decide.
-    }
+    if (e?.status !== 401 || e?.code === 'TOKEN_REUSE_DETECTED') return null;
   }
   try {
-    const me = await organizerApi.getMe();
-    const u = toAuthUser(me as any, 'organizer');
-    if (u) return u;
-  } catch (e: any) {
-    const status = (e as any)?.status;
-    if (status === 401) {
-      try {
-        await organizerApi.refresh();
-        const me = await organizerApi.getMe();
-        const u = toAuthUser(me as any, 'organizer');
-        if (u) return u;
-      } catch { /* session invalid */ }
+    await sessionClients[api].refresh();
+    return await loadSessionUser(api);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchSessionUser(): Promise<AuthUser | null> {
+  const api = getSessionApi();
+  if (api) return loadSessionUser(api).catch(() => null);
+  for (const candidate of ['participant', 'organizer'] as const) {
+    const user = await probeLegacySession(candidate);
+    if (user) {
+      markSessionApi(candidate);
+      return user;
     }
   }
   return null;
@@ -122,15 +113,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (u) {
         setUser(u);
       } else {
-        // Invalid/expired session — clear stale state so guards redirect to login.
         clearAuthTokens();
-        organizerApi.logoutLocal();
         setUser(null);
       }
     } catch {
       if (!mounted.current) return;
       clearAuthTokens();
-      organizerApi.logoutLocal();
       setUser(null);
       setError('Session validation failed. Please sign in again.');
     } finally {
@@ -144,11 +132,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      // Best-effort server invalidation on both APIs; always clear local state.
-      await Promise.allSettled([hmtBackendService.logout(), organizerApi.logout()]);
+      const api = getSessionApi();
+      await Promise.allSettled(api ? [sessionClients[api].logout()] : [hmtBackendService.logout(), organizerApi.logout()]);
     } finally {
       clearAuthTokens();
-      organizerApi.logoutLocal();
       if (mounted.current) setUser(null);
     }
   }, []);
@@ -171,7 +158,6 @@ export function useAuth(): AuthState {
   return ctx;
 }
 
-/** Display name derived ONLY from the authenticated user — no demo fallback. */
 export function displayNameOf(user: AuthUser | null | undefined): string {
   if (!user) return '';
   return user.fullName || user.displayName || user.email.split('@')[0] || 'Account';

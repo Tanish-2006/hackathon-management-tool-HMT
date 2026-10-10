@@ -51,8 +51,8 @@ export default function OrganizerDashboard(){
       }catch(e:any){
         if(mounted){
           if(e instanceof OrganizerApiError){
-            if(e.status===401) setError('Session expired — please sign in as ORGANIZER or ADMIN.');
-            else if(e.status===403) setError('You do not have organizer permission. Switch to an organizer account.');
+            if(e.status===401) setError('Your session expired. Please sign in again.');
+            else if(e.status===403) setError('This page is for organizers. Sign in with an organizer account.');
             else setError(e.message);
           } else setError((e as Error).message)
         }
@@ -65,7 +65,7 @@ export default function OrganizerDashboard(){
     return <div className="space-y-6"><Skeleton className="h-28"/><div className="grid gap-3 md:grid-cols-4"><Skeleton className="h-32"/><Skeleton className="h-32"/><Skeleton className="h-32"/><Skeleton className="h-32"/></div><Skeleton className="h-72"/></div>
   }
   if(error){
-    return <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-700 flex gap-3"><AlertCircle size={18} className="shrink-0 mt-0.5"/><div><b>Could not load organizer dashboard</b><p className="mt-1 text-red-600">{error}</p><div className="mt-3 flex gap-2"><button onClick={()=>location.reload()} className="rounded-lg bg-[#171a2d] px-3 py-1.5 text-xs font-bold text-white">Retry</button><Link href="/login" className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-[#171a2d]">Sign in</Link></div><p className="mt-2 text-xs text-red-500">Organizer dashboard is ORGANIZER/ADMIN only. Mentor and participant roles are redirected.</p></div></div>
+    return <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-700 flex gap-3"><AlertCircle size={18} className="shrink-0 mt-0.5"/><div><b>Could not load organizer dashboard</b><p className="mt-1 text-red-600">{error}</p><div className="mt-3 flex gap-2"><button onClick={()=>location.reload()} className="rounded-lg bg-[#171a2d] px-3 py-1.5 text-xs font-bold text-white">Retry</button><Link href="/login" className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-[#171a2d]">Sign in</Link></div></div></div>
   }
 
   const summary = overview?.summary ?? { totalHackathons:0, activeHackathons:0, totalParticipants:0, totalTeams:0, projectsSubmitted:0, pendingEvaluations:0 };
@@ -96,37 +96,33 @@ export default function OrganizerDashboard(){
 
   return (
     <div className="space-y-8">
-      {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Organizer workspace · dark-first</div>
+          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Organizer</div>
           <h1 className="mt-2 text-3xl font-bold tracking-[-.055em] text-[#171a2d] sm:text-[36px]">Command center.</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#77798a]">Active hackathons, participants, teams, mentors, submissions, evaluations, completion rate, phase status, announcements and analytics — live from organizer API.</p>
-        </div>
+                  </div>
         <div className="flex gap-2">
           <Link href="/organizer/hackathons/create" className="inline-flex items-center gap-2 rounded-xl bg-[#f26a4f] px-4 py-3 text-sm font-bold text-white shadow-[0_4px_0_#c74938] hover:-translate-y-0.5 transition-transform"><Sparkles size={16}/> New hackathon</Link>
           <Link href="/organizer/analytics" className="inline-flex items-center gap-2 rounded-xl border border-[#dedbd1] bg-[#fdfbf5] px-4 py-3 text-sm font-semibold"><BarChart3 size={16}/> Analytics</Link>
         </div>
       </div>
 
-      {/* Stats */}
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Stat label="Total hackathons" value={String(summary.totalHackathons)} sub={`${summary.activeHackathons} active · ${publishedCount} published`} accent="dark"/>
         <Stat label="Active hackathons" value={String(summary.activeHackathons)} sub={active ? `${active.title}` : 'No active hackathon'} accent="lime"/>
         <Stat label="Participants" value={String(summary.totalParticipants)} sub="Across your hackathons" accent="blue"/>
         <Stat label="Teams" value={String(summary.totalTeams)} sub="Across your hackathons" />
         <Stat label="Projects submitted" value={String(summary.projectsSubmitted)} sub="Across your hackathons" accent="lime"/>
-        <Stat label="Pending evaluations" value={String(summary.pendingEvaluations)} sub="Awaiting organizer review" accent="coral"/>
+        <Stat label="Pending evaluations" value={String(summary.pendingEvaluations)} sub="Awaiting review" accent="coral"/>
       </section>
 
-      {/* Featured live hackathon + completion/activity */}
       <div className="grid gap-6 lg:grid-cols-[1.45fr_.65fr]">
         <motion.div initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} className="rounded-[20px] bg-[#171a2d] p-6 text-[#fdfbf5] sm:p-8">
           <div className="flex items-start justify-between">
             <div>
-              <div className="font-mono text-[10px] uppercase tracking-[.18em] text-[#d8e35b]">Live now / organizer read</div>
+              <div className="font-mono text-[10px] uppercase tracking-[.18em] text-[#d8e35b]">Live now</div>
               <h2 className="mt-3 text-3xl font-bold tracking-[-.06em] text-white">{active?.title || 'No active hackathon'}</h2>
-              <p className="mt-2 max-w-md text-sm leading-6 text-[#b9bdca] line-clamp-2">{active?.description || 'Generate your first hackathon via AI draft — it will remain DRAFT until you explicitly confirm and publish.'}</p>
+              <p className="mt-2 max-w-md text-sm leading-6 text-[#b9bdca] line-clamp-2">{active?.description || 'Create a hackathon to get started. Nothing goes live until you publish it.'}</p>
             </div>
             <span className="rounded-full bg-[#d8e35b] px-2.5 py-1 font-mono text-[10px] font-bold text-[#171a2d]">{active?.status || '—'}</span>
           </div>
@@ -149,14 +145,13 @@ export default function OrganizerDashboard(){
             <Link href="/organizer/audit" className="inline-flex items-center gap-2 rounded-xl border border-[#363a51] px-3 py-2 text-xs font-semibold text-[#b9bdca]"><ShieldCheck size={14}/> Audit</Link>
           </div>
 
-          {/* Phase status */}
           <div className="mt-6">
             <div className="font-mono text-[10px] uppercase tracking-[.14em] text-[#9b9fb1]">Phase status{active?.currentPhase ? ` · current: ${active.currentPhase}` : ''}</div>
             <div className="mt-3 flex flex-wrap gap-2">
               {phaseProgress.slice(0,6).map((p:any,i:number)=>(
                 <span key={i} className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${p.status==='COMPLETED'?'bg-[#2a2e45] text-[#d8e35b] border border-[#3a3e5a]': p.status==='ACTIVE'?'bg-[#d8e35b] text-[#171a2d]':'bg-[#252941] text-[#9b9fb1]'}`}>{p.name}</span>
               ))}
-              {phaseProgress.length===0 && <span className="text-xs text-[#9b9fb1]">No phases configured yet — add timeline in wizard Step 6.</span>}
+              {phaseProgress.length===0 && <span className="text-xs text-[#9b9fb1]">No phases yet.</span>}
             </div>
           </div>
         </motion.div>
@@ -172,7 +167,7 @@ export default function OrganizerDashboard(){
                 <div className="rounded-xl bg-[#f4f1e8] p-3"><div className="text-[#77798a]">Pending review</div><div className="mt-1 text-lg font-bold">{evaluation.pendingReview ?? 0}</div></div>
               </div>
             </div>
-            <Link href="/organizer/feedback" className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-[#f26a4f]">Review feedback workflow <ChevronRight size={14}/></Link>
+            <Link href="/organizer/feedback" className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-[#f26a4f]">Review feedback <ChevronRight size={14}/></Link>
           </Card>
 
           <Card className="p-6">
@@ -192,7 +187,6 @@ export default function OrganizerDashboard(){
         </div>
       </div>
 
-      {/* Registration + team status */}
       {active ? (
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="p-6">
@@ -218,7 +212,6 @@ export default function OrganizerDashboard(){
       </div>
       ) : null}
 
-      {/* Needs attention + deadlines */}
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="p-6">
           <div className="flex items-center justify-between"><h3 className="font-bold flex items-center gap-2"><AlertCircle size={16} className="text-[#f26a4f]"/> Needs attention</h3><Badge tone={attention.length ? 'coral' : 'lime'}>{attention.length ? `${attention.length} open` : 'clear'}</Badge></div>
@@ -245,11 +238,10 @@ export default function OrganizerDashboard(){
         </Card>
       </div>
 
-      {/* Analytics charts */}
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="p-6">
           <div className="flex items-center justify-between"><h3 className="font-bold">Builder momentum</h3><span className="font-mono text-xs text-[#f26a4f]">7 days</span></div>
-          <p className="mt-1 text-xs text-[#77798a]">Teams vs submissions over last week (recharts · real API derived)</p>
+          <p className="mt-1 text-xs text-[#77798a]">Teams and submissions over the last week</p>
           <div className="mt-6 h-56">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={teamTrend}>
@@ -291,17 +283,16 @@ export default function OrganizerDashboard(){
         </Card>
       </div>
 
-      {/* Announcements / hackathon list */}
       <Card className="p-6">
         <div className="flex items-center justify-between">
-          <h3 className="font-bold tracking-tight flex items-center gap-2"><Layers size={16}/> All hackathons · organizer view</h3>
+          <h3 className="font-bold tracking-tight flex items-center gap-2"><Layers size={16}/> All hackathons</h3>
           <span className="font-mono text-xs text-[#77798a]">{hackathons.length} total</span>
         </div>
         {hackathons.length===0 ? (
           <div className="mt-6 rounded-2xl border border-dashed border-[#dedbd1] p-8 text-center">
             <div className="mx-auto grid h-10 w-10 place-items-center rounded-xl bg-[#f4f1e8]"><Layers size={18}/></div>
             <h4 className="mt-3 font-bold">No hackathons yet</h4>
-            <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-[#77798a]">Create your first hackathon. Your hackathon will remain in draft until you review and publish.</p>
+            <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-[#77798a]">Create your first hackathon. It stays a draft until you publish it.</p>
             <Link href="/organizer/hackathons/create" className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#171a2d] px-4 py-2 text-xs font-bold text-white">Create hackathon <ChevronRight size={14}/></Link>
           </div>
         ) : (
@@ -323,11 +314,6 @@ export default function OrganizerDashboard(){
           </div>
         )}
       </Card>
-
-      <div className="rounded-2xl border border-[#dedbd1] bg-[#f4f1e8] p-4 flex items-start gap-3">
-        <ShieldCheck size={16} className="mt-0.5 text-[#5aafbd]"/>
-        <div className="text-xs leading-5 text-[#77798a]"><b className="text-[#171a2d]">Permission-aware:</b> Participants cannot see organizer controls. Mentors cannot manage hackathon. Organizer cannot modify immutable mentor feedback (PUT → 403). Audit is append-only.</div>
-      </div>
     </div>
   )
 }

@@ -1,8 +1,27 @@
 import { Pool } from 'pg';
 
-type Tracked =
-  | { kind: 'map'; collection: string; map: Map<string, unknown>; persisted: Map<string, string> }
-  | { kind: 'value'; collection: string; get: () => unknown; persisted: Map<string, string> };
+type MapTrack = {
+  kind: 'map';
+  collection: string;
+  map: Map<string, unknown>;
+  persisted: Map<string, string>;
+  refs: Map<string, unknown>;
+};
+
+type ValueTrack = {
+  kind: 'value';
+  collection: string;
+  get: () => unknown;
+  persisted: Map<string, string>;
+  ref: unknown;
+  length: number;
+  tail: unknown;
+};
+
+type Tracked = MapTrack | ValueTrack;
+
+type Upsert = { collection: string; id: string; data: string; track: Tracked; remember: () => void };
+type Delete = { collection: string; id: string; track: Tracked };
 
 const VALUE_ID = '_';
 
@@ -12,12 +31,14 @@ export class PgMapStore {
   private timer: NodeJS.Timeout | null = null;
   private flushing: Promise<void> | null = null;
   private ready: Promise<void> | null = null;
+  private ticks = 0;
 
   constructor(
     connectionString: string,
     private readonly namespace: string,
     private readonly intervalMs = 1000,
     private readonly onError: (error: unknown) => void = (error) => console.error('[PgMapStore] flush failed', error),
+    private readonly fullDiffEveryTicks = 30,
   ) {
     this.pool = new Pool({ connectionString, max: 4 });
   }
@@ -51,13 +72,17 @@ export class PgMapStore {
       [this.namespace, collection],
     );
     const persisted = new Map<string, string>();
+    const refs = new Map<string, unknown>();
     map.clear();
     for (const row of rows) {
       map.set(row.id, PgMapStore.deserialize(row.data) as V);
       persisted.set(row.id, row.data);
     }
-    for (const [id, value] of map) persisted.set(id, PgMapStore.serialize(value));
-    this.tracked.push({ kind: 'map', collection, map: map as Map<string, unknown>, persisted });
+    for (const [id, value] of map) {
+      persisted.set(id, PgMapStore.serialize(value));
+      refs.set(id, value);
+    }
+    this.tracked.push({ kind: 'map', collection, map: map as Map<string, unknown>, persisted, refs });
   }
 
   async attachValue<V>(collection: string, get: () => V, set: (value: V) => void): Promise<void> {
@@ -69,7 +94,9 @@ export class PgMapStore {
     const persisted = new Map<string, string>();
     if (rows[0]) set(PgMapStore.deserialize(rows[0].data) as V);
     persisted.set(VALUE_ID, PgMapStore.serialize(get()));
-    this.tracked.push({ kind: 'value', collection, get, persisted });
+    const track: ValueTrack = { kind: 'value', collection, get, persisted, ref: undefined, length: 0, tail: undefined };
+    PgMapStore.valueSnapshot(track, get())();
+    this.tracked.push(track);
   }
 
   start(): void {
@@ -78,9 +105,14 @@ export class PgMapStore {
     this.timer.unref();
   }
 
-  async flush(): Promise<void> {
-    if (this.flushing) return this.flushing;
-    this.flushing = this.writeChanges().finally(() => {
+  async flush(full = false): Promise<void> {
+    if (this.flushing) {
+      if (!full) return this.flushing;
+      await this.flushing.catch(() => undefined);
+      return this.flush(true);
+    }
+    const isFull = full || ++this.ticks % this.fullDiffEveryTicks === 0;
+    this.flushing = this.writeChanges(isFull).finally(() => {
       this.flushing = null;
     });
     return this.flushing;
@@ -89,8 +121,18 @@ export class PgMapStore {
   async close(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
-    await this.flush();
+    await this.flush(true);
     await this.pool.end();
+  }
+
+  private static valueSnapshot(track: ValueTrack, value: unknown): () => void {
+    const length = Array.isArray(value) ? value.length : 0;
+    const tail = Array.isArray(value) ? value[length - 1] : undefined;
+    return () => {
+      track.ref = value;
+      track.length = length;
+      track.tail = tail;
+    };
   }
 
   private ensureSchema(): Promise<void> {
@@ -110,28 +152,49 @@ export class PgMapStore {
     return this.ready;
   }
 
-  private collectChanges() {
-    const upserts: { collection: string; id: string; data: string; track: Tracked }[] = [];
-    const deletes: { collection: string; id: string; track: Tracked }[] = [];
+  private collectChanges(full: boolean) {
+    const upserts: Upsert[] = [];
+    const deletes: Delete[] = [];
     for (const track of this.tracked) {
-      const current = new Map<string, string>();
-      if (track.kind === 'map') {
-        for (const [id, value] of track.map) current.set(String(id), PgMapStore.serialize(value));
-      } else {
-        current.set(VALUE_ID, PgMapStore.serialize(track.get()));
-      }
-      for (const [id, data] of current) {
-        if (track.persisted.get(id) !== data) upserts.push({ collection: track.collection, id, data, track });
-      }
-      for (const id of track.persisted.keys()) {
-        if (!current.has(id)) deletes.push({ collection: track.collection, id, track });
-      }
+      if (track.kind === 'map') this.collectMap(track, full, upserts, deletes);
+      else this.collectValue(track, full, upserts);
     }
     return { upserts, deletes };
   }
 
-  private async writeChanges(): Promise<void> {
-    const { upserts, deletes } = this.collectChanges();
+  private collectMap(track: MapTrack, full: boolean, upserts: Upsert[], deletes: Delete[]): void {
+    const seen = new Set<string>();
+    for (const [rawId, value] of track.map) {
+      const id = String(rawId);
+      seen.add(id);
+      if (!full && track.refs.get(id) === value && track.refs.has(id)) continue;
+      const data = PgMapStore.serialize(value);
+      const remember = () => track.refs.set(id, value);
+      if (track.persisted.get(id) === data) remember();
+      else upserts.push({ collection: track.collection, id, data, track, remember });
+    }
+    for (const id of track.persisted.keys()) {
+      if (!seen.has(id)) deletes.push({ collection: track.collection, id, track });
+    }
+  }
+
+  private collectValue(track: ValueTrack, full: boolean, upserts: Upsert[]): void {
+    const value = track.get();
+    const unchanged =
+      !full &&
+      Array.isArray(value) &&
+      value === track.ref &&
+      value.length === track.length &&
+      value[value.length - 1] === track.tail;
+    if (unchanged) return;
+    const data = PgMapStore.serialize(value);
+    const remember = PgMapStore.valueSnapshot(track, value);
+    if (track.persisted.get(VALUE_ID) === data) remember();
+    else upserts.push({ collection: track.collection, id: VALUE_ID, data, track, remember });
+  }
+
+  private async writeChanges(full: boolean): Promise<void> {
+    const { upserts, deletes } = this.collectChanges(full);
     if (upserts.length === 0 && deletes.length === 0) return;
     const client = await this.pool.connect();
     try {
@@ -158,7 +221,13 @@ export class PgMapStore {
     } finally {
       client.release();
     }
-    for (const u of upserts) u.track.persisted.set(u.id, u.data);
-    for (const d of deletes) d.track.persisted.delete(d.id);
+    for (const u of upserts) {
+      u.track.persisted.set(u.id, u.data);
+      u.remember();
+    }
+    for (const d of deletes) {
+      d.track.persisted.delete(d.id);
+      if (d.track.kind === 'map') d.track.refs.delete(d.id);
+    }
   }
 }

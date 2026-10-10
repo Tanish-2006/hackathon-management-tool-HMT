@@ -106,11 +106,3 @@ export class SensitiveRateLimitGuard extends RateLimitGuard {
     super(60, 60000);
   }
 }
-
-/** General API: 100/min (legacy export kept for compatibility). */
-@Injectable()
-export class GeneralRateLimitGuard extends RateLimitGuard {
-  constructor() {
-    super(100, 60000);
-  }
-}

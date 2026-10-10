@@ -43,7 +43,6 @@ export default function OrganizerQuickCreate() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // 5 questions
   const [mode, setMode] = useState<'ONLINE' | 'OFFLINE' | 'HYBRID'>('HYBRID');
   const [about, setAbout] = useState('');
   const [hackathonType, setHackathonType] = useState<WizardType>('OPEN_INNOVATION');
@@ -62,7 +61,6 @@ export default function OrganizerQuickCreate() {
   const hackathonId = hackathon?.id as string | undefined;
   const provenance = useMemo(() => (hackathon?.metadata?.sectionProvenance || {}) as Record<string, string>, [hackathon]);
 
-  // Resume: /organizer/hackathons/quick-create?id=<id> loads server draft (never localStorage).
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get('id');
     if (!id) return;
@@ -108,7 +106,7 @@ export default function OrganizerQuickCreate() {
       setHackathon(res.hackathon); setDraft(res.draft);
       await refreshLists(res.hackathon.id);
       setStep(2);
-      setSuccess('Your hackathon is ready. Review every section — AI never publishes.');
+      setSuccess('Your draft is ready. Review each section before publishing.');
     } catch (e: any) {
       setError(e instanceof OrganizerApiError ? e.message : (e.message || 'Generation failed'));
     } finally { setLoading(false); }
@@ -126,7 +124,7 @@ export default function OrganizerQuickCreate() {
       setHackathon(updated);
       setDraft((updated.metadata as any)?.draft || null);
       setEditing(null);
-      setSuccess(`Saved — ${sectionKey} marked ORGANIZER_EDITED. Your edits override AI content.`);
+      setSuccess('Saved.');
     } catch (e: any) {
       setError(e.message || 'Save failed');
     } finally { setLoading(false); }
@@ -182,9 +180,9 @@ export default function OrganizerQuickCreate() {
       <div className="flex items-center gap-3">
         <Link href="/organizer/hackathons" className="rounded-xl border border-[#dedbd1] bg-[#fdfbf5] p-2"><ArrowLeft size={16} /></Link>
         <div>
-          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Organizer · AI quick create</div>
+          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Create with AI</div>
           <h1 className="text-2xl font-bold tracking-[-.04em]">Let&apos;s create your hackathon.</h1>
-          <p className="text-xs text-[#77798a]">Answer 5 questions — AI drafts the rest. Review → Confirm → Publish. AI never auto-publishes.</p>
+          <p className="text-xs text-[#77798a]">Answer 5 questions and AI drafts the rest. Nothing goes live until you publish.</p>
         </div>
         {hackathon && <span className="ml-auto rounded-full bg-[#d8e35b] px-2.5 py-1 text-[10px] font-bold text-[#171a2d]">{hackathon.status}</span>}
       </div>
@@ -315,7 +313,7 @@ export default function OrganizerQuickCreate() {
           <SectionCard title="Prizes" provenance={provenance.prizes} editing={editing === 'prizes'} onEdit={() => (editing === 'prizes' ? setEditing(null) : startEdit('prizes', ((draft?.prizes || []) as any[]).map((p) => `${p.title} | ${p.description}`).join('\n')))} onRegen={() => regen('prizes')} regenLoading={regenKey === 'prizes'}>
             {editing === 'prizes' ? (
               <div className="space-y-2"><textarea value={editValue} onChange={(e) => setEditValue(e.target.value)} rows={3} className="hmt-input resize-none" /><button onClick={() => void saveEdit({ prizes: editValue.split('\n').map((s) => s.trim()).filter(Boolean).map((l) => { const [title, ...rest] = l.split('|'); return { title: (title || '').trim(), description: rest.join('|').trim() }; }).filter((p) => p.title) }, 'prizes')} disabled={loading} className="rounded-xl bg-[#171a2d] px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Save</button></div>
-            ) : (<div className="space-y-1">{((draft?.prizes || []) as any[]).map((p: any, i: number) => <div key={i} className="text-xs"><b>{p.title}</b> — {p.description}</div>)}{!(draft?.prizes?.length) && <div className="text-xs text-[#77798a]">No prizes configured — add them if the organizer provided prize info.</div>}</div>)}
+            ) : (<div className="space-y-1">{((draft?.prizes || []) as any[]).map((p: any, i: number) => <div key={i} className="text-xs"><b>{p.title}</b> — {p.description}</div>)}{!(draft?.prizes?.length) && <div className="text-xs text-[#77798a]">No prizes yet.</div>}</div>)}
           </SectionCard>
           <SectionCard title="Announcement" provenance={provenance.announcement} editing={editing === 'announcement'} onEdit={() => (editing === 'announcement' ? setEditing(null) : startEdit('announcement', String(draft?.announcement || '')))} onRegen={() => regen('announcement')} regenLoading={regenKey === 'announcement'}>
             {editing === 'announcement' ? (
@@ -334,19 +332,15 @@ export default function OrganizerQuickCreate() {
           <div className="rounded-2xl bg-[#171a2d] p-6 text-[#fdfbf5] sm:p-8">
             <div className="font-mono text-[10px] uppercase tracking-[.16em] text-[#d8e35b]">Final review</div>
             <h2 className="mt-2 text-2xl font-bold">Your hackathon is ready to publish.</h2>
-            <p className="mt-2 text-sm text-[#b9bdca]">{hackathon.title} · {hackathon.status} · v{hackathon.version}</p>
+            <p className="mt-2 text-sm text-[#b9bdca]">{hackathon.title} · {hackathon.status}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={() => setStep(2)} className="rounded-xl border border-[#dedbd1] bg-[#fdfbf5] px-4 py-3 text-xs font-bold" data-testid="button-back-edit">Back to Edit</button>
-            <button onClick={() => void transition('review')} disabled={loading || hackathon.status !== 'DRAFT'} className="rounded-xl bg-[#5aafbd] px-4 py-3 text-xs font-bold text-white disabled:opacity-40" data-testid="button-to-review">→ REVIEW</button>
+            <button onClick={() => void transition('review')} disabled={loading || hackathon.status !== 'DRAFT'} className="rounded-xl bg-[#5aafbd] px-4 py-3 text-xs font-bold text-white disabled:opacity-40" data-testid="button-to-review">Send to review</button>
             <button onClick={() => void transition('confirm')} disabled={loading || hackathon.status !== 'REVIEW'} className="rounded-xl bg-[#f26a4f] px-4 py-3 text-xs font-bold text-white disabled:opacity-40" data-testid="button-confirm-hackathon">Confirm Hackathon</button>
             <button onClick={() => void transition('publish')} disabled={loading || hackathon.status !== 'CONFIRMED'} className="inline-flex items-center gap-2 rounded-xl bg-[#d8e35b] px-4 py-3 text-xs font-bold text-[#171a2d] disabled:opacity-40" data-testid="button-publish-hackathon"><Rocket size={14} /> Publish Hackathon</button>
           </div>
-          {hackathon.status === 'PUBLISHED' && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700 flex gap-2"><CheckCircle2 size={16} /><span>Published! Participants now see the organizer-approved version.</span><Link href={`/organizer/hackathons/${hackathonId}`} className="ml-auto font-bold underline">Open workspace</Link></div>}
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 flex gap-2 items-start">
-            <ShieldCheck size={16} className="mt-0.5 shrink-0 text-amber-600" />
-            <p className="text-xs leading-5 text-amber-800"><b>Guardrail:</b> publishing requires your explicit click and CONFIRMED status. AI can never publish — direct transitions return 400.</p>
-          </div>
+          {hackathon.status === 'PUBLISHED' && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700 flex gap-2"><CheckCircle2 size={16} /><span>Published! Participants can now see it.</span><Link href={`/organizer/hackathons/${hackathonId}`} className="ml-auto font-bold underline">Open workspace</Link></div>}
         </div>
       )}
     </div>

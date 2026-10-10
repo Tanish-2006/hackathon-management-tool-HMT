@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Settings2, ShieldCheck, Bell, Eye, Lock, LogOut, Save, Loader2, AlertCircle, Check, X, Github, KeyRound, Mail } from 'lucide-react';
+import { Settings2, ShieldCheck, Bell, Eye, Lock, LogOut, Save, Loader2, AlertCircle, Check, X, Github, Mail } from 'lucide-react';
 import { hmtBackendService, ApiError } from '@/services/backendApi';
 import { useAuth } from '@/services/auth-context';
 import { useLocation } from 'wouter';
@@ -28,16 +28,14 @@ export default function ParticipantSettings(){
   },[]);
 
   function handleLogout(){
-    // Shared session logout: server invalidation (best-effort) + token clear + auth-state reset.
     void logout().finally(() => setLocation('/login'));
   }
 
   async function handleSave(e: React.FormEvent){
     e.preventDefault(); setSaving(true); setError(null);
-    // demo: save to localStorage for notifications, no backend yet
     try{
       localStorage.setItem('hmt_participant_notifications', JSON.stringify(notifications));
-      setSuccess('Preferences saved locally (demo). Backend sync pending.');
+      setSuccess('Preferences saved on this device.');
       setTimeout(()=>setSuccess(null), 2500);
     }catch(err){ setError(friendly(err)); }
     finally{ setSaving(false); }
@@ -48,9 +46,9 @@ export default function ParticipantSettings(){
   return (
     <div className="space-y-6 max-w-3xl">
       <div>
-        <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Settings · Participant</div>
+        <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Settings</div>
         <h1 className="mt-2 text-3xl font-bold tracking-[-.05em] text-[#171a2d]">Tune your workspace.</h1>
-        <p className="mt-2 text-sm leading-6 text-[#77798a]">Notifications, privacy defaults and account controls. Dark-first, accessible, responsive.</p>
+        <p className="mt-2 text-sm leading-6 text-[#77798a]">Notifications, privacy and account.</p>
       </div>
 
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex gap-2"><AlertCircle size={16}/>{error}<button onClick={()=>setError(null)} className="ml-auto"><X size={14}/></button></div>}
@@ -59,7 +57,7 @@ export default function ParticipantSettings(){
       <form onSubmit={handleSave} className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6 space-y-6">
         <div>
           <h3 className="font-bold flex items-center gap-2"><Bell size={16}/> Notifications</h3>
-          <p className="mt-1 text-xs text-[#77798a]">Choose what surfaces in your inbox (demo, stored locally until backend endpoint exists).</p>
+          <p className="mt-1 text-xs text-[#77798a]">Choose what shows up in your inbox. Saved on this device.</p>
           <div className="mt-4 space-y-3">
             {[
               { key:'announcements', label:'Hackathon announcements', desc:'Published announcements from organizers' },
@@ -77,15 +75,14 @@ export default function ParticipantSettings(){
         <div>
           <h3 className="font-bold flex items-center gap-2"><Eye size={16}/> Privacy defaults</h3>
           <div className="mt-3 rounded-xl bg-[#f4f1e8] p-4 text-xs leading-5 text-[#77798a]">
-            Your profile visibility defaults to <b className="text-[#171a2d]">PUBLIC_PROFILE</b> and skill visibility to <b className="text-[#171a2d]">TEAM_DISCOVERABLE</b>. Change them in <a href="/participant/profile" className="underline font-bold text-[#171a2d]">Profile</a>. Private teams hide members and invite codes.
+            By default other participants can find you for team matching. Change this in <a href="/participant/profile" className="underline font-bold text-[#171a2d]">Profile</a>. Private teams hide members and invite codes.
           </div>
         </div>
 
         <div>
           <h3 className="font-bold flex items-center gap-2"><ShieldCheck size={16}/> Security</h3>
           <div className="mt-3 grid gap-3 text-xs">
-            <div className="rounded-xl border border-[#e5e1d7] p-3 flex items-center justify-between"><span className="flex items-center gap-2"><KeyRound size={14}/> Session token</span><span className="rounded-full bg-[#e9e5da] px-2 py-1 font-mono text-[11px]">Bearer · localStorage</span></div>
-            <div className="rounded-xl border border-[#e5e1d7] p-3 flex items-center justify-between"><span className="flex items-center gap-2"><Github size={14}/> GitHub</span><span className="text-[#77798a]">Encrypted at rest · read-only · <a href="/participant/github" className="underline">manage</a></span></div>
+            <div className="rounded-xl border border-[#e5e1d7] p-3 flex items-center justify-between"><span className="flex items-center gap-2"><Github size={14}/> GitHub</span><span className="text-[#77798a]"><a href="/participant/github" className="underline">manage</a></span></div>
             <div className="rounded-xl border border-[#e5e1d7] p-3 flex items-center justify-between"><span className="flex items-center gap-2"><Mail size={14}/> Email</span><span className="font-mono">{email || '—'}</span></div>
           </div>
         </div>
@@ -95,12 +92,6 @@ export default function ParticipantSettings(){
           <button type="button" onClick={handleLogout} className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-bold text-red-700 inline-flex items-center gap-2"><LogOut size={16}/> Sign out</button>
         </div>
       </form>
-
-      <div className="rounded-2xl bg-[#171a2d] p-6 text-[#fdfbf5]">
-        <div className="font-mono text-[10px] uppercase tracking-[.16em] text-[#d8e35b]">Accessibility & responsive</div>
-        <p className="mt-2 text-xs leading-5 text-[#b9bdca]">All participant pages are keyboard-navigable, use semantic headings, contrast-checked colors, and stack cleanly on mobile (280px → 1440px). Loading, empty, error and success states are present on every page.</p>
-        <div className="mt-3 text-xs text-[#9b9fb1]">Design: dark-first, futuristic, premium, clean — not generic admin or crypto. Motion is subtle (150–300ms) and respects reduced-motion.</div>
-      </div>
     </div>
   );
 }

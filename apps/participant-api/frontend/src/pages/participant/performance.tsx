@@ -25,10 +25,6 @@ export default function ParticipantPerformance(){
   const [error,setError]=useState<string|null>(null);
   const [activeTab,setActiveTab]=useState<'timeline'|'feedback'|'evaluations'|'mistakes'>('timeline');
 
-  // Hackathon-scoped context: per-project endpoints accept a projectId, so
-  // resolve this hackathon's project first and filter by it. Timeline,
-  // history and elimination remain team-global on the backend (documented
-  // limitation) — they are shown only with their project attribution.
   const ctx = useHackathonContext();
   const contextId = ctx.selectedId;
 
@@ -38,15 +34,13 @@ export default function ParticipantPerformance(){
     async function load(){
       setLoading(true); setError(null);
       try{
-        // Resolve this hackathon's project for scoped queries. Timeline,
-        // history and elimination accept the same project scope.
         let projectId: string | undefined;
         if(contextId){
           try{
             const p = await hmtBackendService.getMyProject(contextId);
             const proj = (p as any)?.project ?? p;
             if(proj?.id) projectId = proj.id;
-          }catch{ /* teamless — global fallback below */ }
+          }catch {}
         }
         const [tl, fb, ev, mi, ph, imp, hi, el] = await Promise.allSettled([
           hmtBackendService.getTimeline(projectId),
@@ -67,7 +61,6 @@ export default function ParticipantPerformance(){
         if(imp.status==='fulfilled'){ const v:any=imp.value; setImprovements(v?.improvementAreas || v?.data || []); }
         if(hi.status==='fulfilled') setHistory(hi.value as any);
         if(el.status==='fulfilled') setElim(el.value as any);
-        // also hydrate from timeline if subfields missing
         if(tl.status==='fulfilled'){
           const t:any=tl.value;
           if(t?.feedbacks && !feedback.length) setFeedback(t.feedbacks);
@@ -91,9 +84,9 @@ export default function ParticipantPerformance(){
     <div className="space-y-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Performance · participation & learning</div>
+          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Progress</div>
           <h1 className="mt-2 text-3xl font-bold tracking-[-.05em] text-[#171a2d]">Your learning, measured.</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#77798a]">Hackathon participation, team performance, mentor feedback, phase progress, mistakes and improvement areas — only published items are visible (transparency workflow).</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#77798a]">Feedback, scores and what to improve, once organizers publish them.</p>
         </div>
         <div className="flex gap-2">
           <span className="rounded-full bg-[#171a2d] px-3 py-1.5 text-xs font-bold text-white flex items-center gap-1"><Trophy size={14}/> Avg {avgScore}</span>
@@ -101,7 +94,6 @@ export default function ParticipantPerformance(){
         </div>
       </div>
 
-      {/* Hackathon context: filtered panels follow this hackathon's project */}
       <div className="rounded-xl border border-[#dedbd1] bg-[#f4f1e8] px-4 py-2.5 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
         {ctx.loading ? (
           <span className="text-xs text-[#77798a]">Loading hackathon context…</span>
@@ -119,12 +111,11 @@ export default function ParticipantPerformance(){
                 {ctx.options.map(o=><option key={o.id} value={o.id}>{o.title}{o.registered?'':' (not registered)'}</option>)}
               </select>
             </label>
-            <span className="text-[11px] text-[#77798a]">Feedback, evaluations, mistakes, phase progress, timeline, history & elimination filtered to this hackathon&apos;s project.</span>
+            <span className="text-[11px] text-[#77798a]">Showing results for this hackathon.</span>
           </>
         )}
       </div>
 
-      {/* KPI */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-5"><div className="font-mono text-[10px] uppercase tracking-wider text-[#77798a]">Mentor feedback</div><div className="mt-2 text-2xl font-bold">{feedback.length}</div><div className="text-xs text-[#77798a]">Published only</div></div>
         <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-5"><div className="font-mono text-[10px] uppercase tracking-wider text-[#77798a]">Phase progress</div><div className="mt-2 text-2xl font-bold">{phase.length}</div><div className="text-xs text-[#77798a]">Milestone updates</div></div>
@@ -132,7 +123,6 @@ export default function ParticipantPerformance(){
         <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-5"><div className="font-mono text-[10px] uppercase tracking-wider text-[#77798a]">Scans</div><div className="mt-2 text-2xl font-bold">{timeline?.scans?.length ?? 0}</div><div className="text-xs text-[#77798a]">Repository scans</div></div>
       </div>
 
-      {/* Tabs */}
       <div className="flex gap-2 overflow-auto pb-1">
         {[
           { id:'timeline', label:'Timeline' },
@@ -157,8 +147,7 @@ export default function ParticipantPerformance(){
                     {p.score && <div className="text-xs text-[#77798a]">Score {p.score}</div>}
                   </div>
                 </div>
-              )) : <div className="rounded-xl bg-[#f4f1e8] p-4 text-xs text-[#77798a]">No phase progress yet — published updates will appear here.</div>}
-              {/* scans as timeline */}
+              )) : <div className="rounded-xl bg-[#f4f1e8] p-4 text-xs text-[#77798a]">No progress updates yet.</div>}
               {(timeline?.scans||[]).slice(0,3).map((s:any)=><div key={s.id} className="flex gap-3"><div className="mt-1 h-2.5 w-2.5 rounded-full bg-[#5aafbd] shrink-0"/><div className="flex-1 rounded-xl border border-[#e5e1d7] p-3 text-xs"><div className="font-bold">Scan {s.status || 'COMPLETED'}</div><div className="text-[#77798a]">{s.findings?.length||0} findings · {s.createdAt ? new Date(s.createdAt).toLocaleString():''}</div></div></div>)}
             </div>
           </div>
@@ -188,8 +177,8 @@ export default function ParticipantPerformance(){
 
       {activeTab==='feedback' && (
         <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6">
-          <h3 className="font-bold flex items-center gap-2"><MessageSquare size={16}/> Mentor feedback · Published only</h3>
-          <p className="mt-1 text-xs text-[#77798a]">Unpublished feedback is hidden until organizer publishes. Shows author, version, timestamp, immutable audit.</p>
+          <h3 className="font-bold flex items-center gap-2"><MessageSquare size={16}/> Mentor feedback</h3>
+          <p className="mt-1 text-xs text-[#77798a]">Feedback appears here once the organizer publishes it.</p>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             {feedback.length ? feedback.map((f:any)=>(
               <div key={f.id} className="rounded-2xl border border-[#e5e1d7] p-4 bg-white">
@@ -206,7 +195,7 @@ export default function ParticipantPerformance(){
 
       {activeTab==='evaluations' && (
         <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6">
-          <h3 className="font-bold flex items-center gap-2"><Award size={16}/> Evaluations · Immutable, published only</h3>
+          <h3 className="font-bold flex items-center gap-2"><Award size={16}/> Evaluations</h3>
           <div className="mt-4 grid gap-4 md:grid-cols-3">
             {evals.length ? evals.map((e:any)=>(
               <div key={e.id} className="rounded-2xl bg-[#171a2d] p-5 text-[#fdfbf5]">
@@ -233,11 +222,11 @@ export default function ParticipantPerformance(){
           <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6">
             <h3 className="font-bold flex items-center gap-2"><AlertTriangle size={16} className="text-[#f26a4f]"/> Mistakes · Published</h3>
             <div className="mt-4 space-y-3">
-              {mistakes.length ? mistakes.map((m:any)=><div key={m.id} className="rounded-xl border border-[#e5e1d7] p-4"><div className="flex items-center justify-between"><span className="text-sm font-bold">{m.title}</span><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${m.severity==='HIGH'?'bg-red-100 text-red-700': m.severity==='MEDIUM'?'bg-amber-100 text-amber-700':'bg-[#f4f1e8] text-[#77798a]'}`}>{m.severity}</span></div><p className="mt-2 text-xs leading-5 text-[#77798a]">{m.description}</p><div className="mt-2 inline-flex rounded-full bg-[#171a2d] px-2 py-1 text-[11px] font-bold text-white">{m.category}</div></div>) : <div className="rounded-xl bg-[#f4f1e8] p-4 text-xs text-[#77798a]">No published mistakes — keep it that way.</div>}
+              {mistakes.length ? mistakes.map((m:any)=><div key={m.id} className="rounded-xl border border-[#e5e1d7] p-4"><div className="flex items-center justify-between"><span className="text-sm font-bold">{m.title}</span><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${m.severity==='HIGH'?'bg-red-100 text-red-700': m.severity==='MEDIUM'?'bg-amber-100 text-amber-700':'bg-[#f4f1e8] text-[#77798a]'}`}>{m.severity}</span></div><p className="mt-2 text-xs leading-5 text-[#77798a]">{m.description}</p><div className="mt-2 inline-flex rounded-full bg-[#171a2d] px-2 py-1 text-[11px] font-bold text-white">{m.category}</div></div>) : <div className="rounded-xl bg-[#f4f1e8] p-4 text-xs text-[#77798a]">Nothing flagged.</div>}
             </div>
           </div>
           <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6">
-            <h3 className="font-bold flex items-center gap-2"><Target size={16}/> Improvement areas & elimination</h3>
+            <h3 className="font-bold flex items-center gap-2"><Target size={16}/> Improvement areas</h3>
             <div className="mt-4 space-y-3">
               {improvements.length ? improvements.map((imp:any)=><div key={imp.id} className="rounded-xl bg-[#f4f1e8] p-3 text-xs"><div className="font-bold">{imp.area}</div><div className="text-[#77798a]">{imp.suggestion}</div><div className="mt-1 text-[11px] font-mono">{imp.priority}</div></div>) : <div className="rounded-xl bg-[#f4f1e8] p-3 text-xs text-[#77798a]">No improvement areas.</div>}
               <div className="rounded-xl bg-[#171a2d] p-4 text-[#fdfbf5] text-xs">

@@ -78,10 +78,10 @@ export class VaultEncryptionProvider implements TokenEncryptionProvider {
 
 ## Verification
 - Check DB column is ciphertext (base64, length > 40, not `mock_github_token` prefix).
-- Run `apps/participant-api/src/security/phase26b-security.spec.ts`:
+- Run `apps/participant-api/src/security/phase26b-security.test.ts`:
   - `encrypted GitHub credential storage` — ensures ciphertext stored, decrypt returns original, DTO/AI/audit never contain token.
   - `credential never logged` — ensures `sanitizeExceptionMessage` works.
 
 ## References
 - Implementation: `packages/security/src/encryption.ts:1`, `apps/participant-api/src/security/token-encryption.service.ts:1`
-- Tests: `packages/security/src/encryption.test.ts:1`, `apps/participant-api/src/security/phase26b-security.spec.ts:88`
+- Tests: `packages/security/src/encryption.test.ts:1`, `apps/participant-api/src/security/phase26b-security.test.ts:88`

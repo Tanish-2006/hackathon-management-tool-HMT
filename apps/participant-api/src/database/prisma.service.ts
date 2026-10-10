@@ -4,6 +4,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { PgMapStore } from '@hmt/common';
 
 /**
@@ -161,7 +162,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         }
         const id =
           data.id ||
-          `user_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+          `user_${randomUUID()}`;
         const record = {
           id,
           email: data.email,
@@ -330,7 +331,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get emailVerificationToken() {
     return {
       create: async ({ data }: any) => {
-        const id = `ev_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `ev_${randomUUID()}`;
         const rec = { id, ...data, isUsed: false, createdAt: new Date() };
         this.emailVerificationTokens.set(data.tokenHash, rec);
         return rec;
@@ -367,7 +368,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get passwordResetToken() {
     return {
       create: async ({ data }: any) => {
-        const id = `pr_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `pr_${randomUUID()}`;
         const rec = { id, ...data, isUsed: false, createdAt: new Date() };
         this.passwordResetTokens.set(data.tokenHash, rec);
         return rec;
@@ -403,7 +404,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get phoneVerification() {
     return {
       create: async ({ data }: any) => {
-        const id = `pv_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `pv_${randomUUID()}`;
         const rec = { id, attempts: 0, isUsed: false, createdAt: new Date(), ...data };
         this.phoneVerifications.set(data.otpHash, rec);
         return rec;
@@ -456,7 +457,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get deviceSession() {
     return {
       create: async ({ data }: any) => {
-        const id = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `sess_${randomUUID()}`;
         const rec = {
           id,
           ...data,
@@ -508,7 +509,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get refreshToken() {
     return {
       create: async ({ data }: any) => {
-        const id = `token_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `token_${randomUUID()}`;
         const record = { id, ...data, isRevoked: false, createdAt: new Date() };
         this.tokens.set(data.tokenHash, record);
         // also create device session if not exists
@@ -702,7 +703,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         const id =
           data.id ||
           data.hackathonId ||
-          `hack_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+          `hack_${randomUUID()}`;
         const status = data.status ?? (data.isPublished === false ? 'DRAFT' : 'PUBLISHED');
         const record = {
           ...data,
@@ -744,7 +745,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
             ? data.announcements.create
             : [data.announcements.create];
           for (const a of anns) {
-            const annId = `ann_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+            const annId = `ann_${randomUUID()}`;
             this.announcements.set(annId, {
               id: annId,
               hackathonId: id,
@@ -807,7 +808,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         return null;
       },
       create: async ({ data }: any) => {
-        const id = data.id ?? `reg_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = data.id ?? `reg_${randomUUID()}`;
         const record = {
           status: 'REGISTERED',
           createdAt: new Date(),
@@ -834,7 +835,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get announcement() {
     return {
       create: async ({ data }: any) => {
-        const id = `ann_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `ann_${randomUUID()}`;
         const rec = {
           id,
           ...data,
@@ -958,7 +959,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         return arr;
       },
       create: async ({ data }: any) => {
-        const id = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `mem_${randomUUID()}`;
         const rec = { id, ...data, joinedAt: new Date() };
         this.members.set(id, rec);
         return rec;
@@ -1011,7 +1012,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get team() {
     return {
       create: async ({ data, include }: any) => {
-        const id = `team_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `team_${randomUUID()}`;
         const record: any = {
           id,
           name: data.name,
@@ -1034,7 +1035,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
             ? data.members.create
             : [data.members.create];
           for (const c of creations) {
-            const mId = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+            const mId = `mem_${randomUUID()}`;
             const member = {
               id: mId,
               teamId: id,
@@ -1085,12 +1086,16 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
           result.members = members;
         }
         if (include?.project) {
-          result.project = this.projects.get(t.id) || null;
-          if (result.project && include.project.include?.milestones) {
-            result.project.milestones = Array.from(
-              this.projectMilestones.values(),
-            ).filter((mm: any) => mm.projectId === result.project.id);
-          }
+          const project = this.projects.get(t.id) || null;
+          result.project =
+            project && include.project.include?.milestones
+              ? {
+                  ...project,
+                  milestones: Array.from(this.projectMilestones.values()).filter(
+                    (mm: any) => mm.projectId === project.id,
+                  ),
+                }
+              : project;
         }
         if (include?.hackathon)
           result.hackathon = this.hackathons.get(t.hackathonId) || null;
@@ -1155,7 +1160,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get teamInvitation() {
     return {
       create: async ({ data }: any) => {
-        const id = `inv_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `inv_${randomUUID()}`;
         const rec = {
           id,
           ...data,
@@ -1212,7 +1217,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   // ---------- TeamInterest ----------
   get teamInterest() {    return {
       create: async ({ data }: any) => {
-        const id = `interest_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `interest_${randomUUID()}`;
         const rec = { id, ...data, createdAt: new Date() };
         this.teamInterests.set(id, rec);
         return rec;
@@ -1260,7 +1265,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get teamJoinRequest() {
     return {
       create: async ({ data }: any) => {
-        const id = `req_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `req_${randomUUID()}`;
         const rec = {
           id,
           ...data,
@@ -1323,7 +1328,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get teamLeaveRequest() {
     return {
       create: async ({ data }: any) => {
-        const id = `lvr_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `lvr_${randomUUID()}`;
         const rec = {
           id,
           ...data,
@@ -1387,7 +1392,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get notification() {
     return {
       create: async ({ data }: any) => {
-        const id = `ntf_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `ntf_${randomUUID()}`;
         const rec = {
           id,
           ...data,
@@ -1464,7 +1469,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
       create: async ({ data }: any) => {
         const id =
           data.id ||
-          `proj_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+          `proj_${randomUUID()}`;
         const rec = {
           id,
           ...data,
@@ -1548,7 +1553,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get projectMilestone() {
     return {
       create: async ({ data }: any) => {
-        const id = `mile_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `mile_${randomUUID()}`;
         const rec = {
           id,
           ...data,
@@ -1589,7 +1594,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get repositoryScan() {
     return {
       create: async ({ data }: any) => {
-        const id = `scan_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `scan_${randomUUID()}`;
         const scan = {
           id,
           ...data,
@@ -1607,7 +1612,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         const updated = { ...scan, ...data, updatedAt: new Date() };
         if (data.findings?.create) {
           for (const f of data.findings.create) {
-            const fId = `find_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+            const fId = `find_${randomUUID()}`;
             this.findings.set(fId, {
               id: fId,
               scanId: where.id,
@@ -1678,7 +1683,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get scanFinding() {
     return {
       create: async ({ data }: any) => {
-        const id = `find_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `find_${randomUUID()}`;
         const rec = { id, ...data, createdAt: new Date() };
         this.findings.set(id, rec);
         return rec;
@@ -1696,7 +1701,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get repositoryAccessGrant() {
     return {
       create: async ({ data }: any) => {
-        const id = `grant_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `grant_${randomUUID()}`;
         const rec = {
           id,
           ...data,
@@ -1707,7 +1712,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         };
         this.repositoryGrants.set(id, rec);
         // audit
-        const auditId = `audit_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const auditId = `audit_${randomUUID()}`;
         this.auditLogs.set(auditId, {
           id: auditId,
           userId: data.grantedById,
@@ -1752,7 +1757,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         const updated = { ...rec, ...data };
         if (data.status === 'REVOKED' && !rec.revokedAt) {
           updated.revokedAt = new Date();
-          const auditId = `audit_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+          const auditId = `audit_${randomUUID()}`;
           this.auditLogs.set(auditId, {
             id: auditId,
             userId: rec.grantedById,
@@ -1803,7 +1808,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         return arr.map(normalizeRecord);
       },
       create: async ({ data }: any) => {
-        const id = `ghc_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `ghc_${randomUUID()}`;
         // Support both legacy `accessToken` and new `encryptedAccessToken`
         const encrypted = data.encryptedAccessToken ?? data.accessToken;
         const rec = {
@@ -1833,7 +1838,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         }
         const encrypted = create.encryptedAccessToken ?? create.accessToken;
         const rec = {
-          id: `ghc_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+          id: `ghc_${randomUUID()}`,
           ...create,
           encryptedAccessToken: encrypted,
           accessToken: encrypted,
@@ -1857,7 +1862,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get aiInteraction() {
     return {
       create: async ({ data }: any) => {
-        const id = `aii_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `aii_${randomUUID()}`;
         const rec = {
           id,
           ...data,
@@ -1918,7 +1923,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get mentorFeedback() {
     return {
       create: async ({ data }: any) => {
-        const id = `fb_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `fb_${randomUUID()}`;
         const record = {
           id,
           ...data,
@@ -1992,7 +1997,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         }
         if (data.version !== undefined) allowedUpdate.version = data.version;
         // audit log
-        const auditId = `audit_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const auditId = `audit_${randomUUID()}`;
         this.auditLogs.set(auditId, {
           id: auditId,
           action: 'FEEDBACK_PUBLISH',
@@ -2058,7 +2063,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get phaseProgress() {
     return {
       create: async ({ data }: any) => {
-        const id = `phase_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `phase_${randomUUID()}`;
         const rec = { id, ...data, createdAt: new Date() };
         this._phaseProgressStore.set(id, rec);
         return rec;
@@ -2091,7 +2096,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get mistake() {
     return {
       create: async ({ data }: any) => {
-        const id = `mistake_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `mistake_${randomUUID()}`;
         const rec = {
           id,
           ...data,
@@ -2121,7 +2126,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get improvementArea() {
     return {
       create: async ({ data }: any) => {
-        const id = `imp_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `imp_${randomUUID()}`;
         const rec = {
           id,
           ...data,
@@ -2152,7 +2157,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get evaluation() {
     return {
       create: async ({ data }: any) => {
-        const id = `eval_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `eval_${randomUUID()}`;
         const rec = {
           id,
           ...data,
@@ -2201,7 +2206,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get participantInsight() {
     return {
       create: async ({ data }: any) => {
-        const id = `insight_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `insight_${randomUUID()}`;
         const rec = {
           id,
           ...data,
@@ -2234,7 +2239,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get postHackathonContinuation() {
     return {
       create: async ({ data }: any) => {
-        const id = `cont_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `cont_${randomUUID()}`;
         const record = { id, ...data, createdAt: new Date() };
         this.continuations.set(id, record);
         return record;
@@ -2253,7 +2258,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get projectContinuation() {
     return {
       create: async ({ data }: any) => {
-        const id = `projCont_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `projCont_${randomUUID()}`;
         const rec = {
           id,
           ...data,
@@ -2301,7 +2306,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get projectOpportunity() {
     return {
       create: async ({ data }: any) => {
-        const id = `opp_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `opp_${randomUUID()}`;
         const rec = { id, ...data, createdAt: new Date() };
         this.projectOpportunities.set(id, rec);
         return rec;
@@ -2322,7 +2327,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get recommendedResource() {
     return {
       create: async ({ data }: any) => {
-        const id = `res_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `res_${randomUUID()}`;
         const rec = { id, ...data, createdAt: new Date() };
         this.recommendedResources.set(id, rec);
         return rec;
@@ -2341,7 +2346,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get roadmapItem() {
     return {
       create: async ({ data }: any) => {
-        const id = `road_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `road_${randomUUID()}`;
         const rec = {
           id,
           ...data,
@@ -2378,7 +2383,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get aiConversation() {
     return {
       create: async ({ data }: any) => {
-        const id = `conv_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `conv_${randomUUID()}`;
         const rec = {
           id,
           ...data,
@@ -2423,7 +2428,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get aiMessage() {
     return {
       create: async ({ data }: any) => {
-        const id = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `msg_${randomUUID()}`;
         const rec = { id, ...data, createdAt: new Date() };
         this.aiMessages.set(id, rec);
         return rec;
@@ -2450,7 +2455,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get aiAnalysisJob() {
     return {
       create: async ({ data }: any) => {
-        const id = `job_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `job_${randomUUID()}`;
         const rec = {
           id,
           ...data,
@@ -2498,7 +2503,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get aiFinding() {
     return {
       create: async ({ data }: any) => {
-        const id = `aif_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `aif_${randomUUID()}`;
         const rec = { id, ...data, createdAt: new Date() };
         this.aiFindings.set(id, rec);
         return rec;
@@ -2514,7 +2519,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get aiRecommendation() {
     return {
       create: async ({ data }: any) => {
-        const id = `airec_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `airec_${randomUUID()}`;
         const rec = { id, ...data, createdAt: new Date() };
         this.aiRecommendations.set(id, rec);
         return rec;
@@ -2533,7 +2538,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get auditLog() {
     return {
       create: async ({ data }: any) => {
-        const id = `audit_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const id = `audit_${randomUUID()}`;
         const record = { id, ...data, createdAt: new Date() };
         this.auditLogs.set(id, record);
         return record;

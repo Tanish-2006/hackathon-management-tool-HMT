@@ -12,3 +12,5 @@ prisma/migrations/
 
 !.env.example
 !**/.env.example
+.playwright-mcp/
+.codegraph/

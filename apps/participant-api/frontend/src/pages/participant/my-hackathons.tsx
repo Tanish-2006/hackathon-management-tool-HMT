@@ -23,9 +23,6 @@ export default function MyHackathons(){
     try{
       const res = await hmtBackendService.getMyHackathons(b==='all'?undefined:b);
       setRows(res.data ?? []);
-      // AI availability per live hackathon (backend-derived, not hardcoded).
-      // Scoped by hackathon so one workspace never reports another's status.
-      // Fetched in parallel — the previous sequential loop stalled the grid.
       const live = (res.data ?? []).filter((r: any) => r.bucket === 'live');
       const settled = await Promise.all(
         live.map((r: any) =>
@@ -49,8 +46,8 @@ export default function MyHackathons(){
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">My Hackathons</div>
-          <h1 className="mt-2 text-3xl font-bold tracking-[-.05em] text-[#171a2d]">Your lifecycle</h1>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-[#77798a]">Registered → Upcoming → Live → Completed. Live shows phase, countdown, team, project, submission + mentor/AI availability.</p>
+          <h1 className="mt-2 text-3xl font-bold tracking-[-.05em] text-[#171a2d]">Your hackathons</h1>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-[#77798a]">Everything you've registered for, from upcoming to completed.</p>
         </div>
         <Link href="/participant/hackathons" className="rounded-xl border border-[#dedbd1] px-4 py-2 text-xs font-bold">Discover more</Link>
       </div>
@@ -70,8 +67,8 @@ export default function MyHackathons(){
               <div className="mt-2 flex items-center gap-2 text-xs text-[#77798a]"><Clock3 size={12}/> {r.eventEnd?`Ends ${new Date(r.eventEnd).toLocaleDateString()}`:'—'} · {r.mode} · {r.registrationStatus}</div>
               {r.bucket==='live' && (
                 <div className="mt-3 rounded-xl bg-[#171a2d] p-3 text-xs text-[#fdfbf5]">
-                  <div className="flex items-center gap-2 font-bold"><Sparkles size={13} className="text-[#d8e35b]"/> AI Teammate: {ai[r.id]?.allowed?'AVAILABLE':'LOCKED'}</div>
-                  <div className="mt-1 text-[#9b9fb1]">{ai[r.id]?.allowed?'Ask project questions — hints only, targeted retrieval.':'Locked outside live window (backend enforced).'}</div>
+                  <div className="flex items-center gap-2 font-bold"><Sparkles size={13} className="text-[#d8e35b]"/> AI teammate: {ai[r.id]?.allowed?'available':'not available'}</div>
+                  <div className="mt-1 text-[#9b9fb1]">{ai[r.id]?.allowed?'Ask questions about your project.':'Available while the hackathon is live.'}</div>
                   <div className="mt-2 flex gap-2">
                     <Link href={`/participant/my-hackathons/${r.id}/ai`} className="rounded-lg bg-[#d8e35b] px-3 py-1.5 font-bold text-[#171a2d]">Open AI</Link>
                     <Link href="/participant/projects" className="rounded-lg border border-[#3a3e5a] px-3 py-1.5">Project</Link>

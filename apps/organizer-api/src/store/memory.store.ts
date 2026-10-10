@@ -13,6 +13,14 @@ import type {
 import { randomUUID } from 'crypto';
 import { PgMapStore } from '@hmt/common';
 
+export const HACKATHON_TRANSITIONS: Readonly<Record<HackathonStatus, readonly HackathonStatus[]>> = {
+  DRAFT: ['REVIEW'],
+  REVIEW: ['DRAFT', 'CONFIRMED'],
+  CONFIRMED: ['PUBLISHED', 'REVIEW'],
+  PUBLISHED: ['ARCHIVED'],
+  ARCHIVED: [],
+};
+
 // Central in-memory store. All services share this singleton.
 // In production this would delegate to @hmt/database Postgres + Prisma.
 // For tests / demo we keep it in memory with deterministic behavior.
@@ -101,16 +109,7 @@ export class MemoryStore {
 
   // Hackathon state transition validation
   canTransition(from: HackathonStatus, to: HackathonStatus): boolean {
-    // Keep in sync with HackathonService.allowedTransitions: archive is
-    // terminal and reachable ONLY from PUBLISHED.
-    const allowed: Record<HackathonStatus, HackathonStatus[]> = {
-      DRAFT: ['REVIEW'],
-      REVIEW: ['DRAFT', 'CONFIRMED'],
-      CONFIRMED: ['PUBLISHED', 'REVIEW'],
-      PUBLISHED: ['ARCHIVED'],
-      ARCHIVED: [], // terminal
-    };
-    return allowed[from]?.includes(to) ?? false;
+    return HACKATHON_TRANSITIONS[from]?.includes(to) ?? false;
   }
 
   // Generate slug from title

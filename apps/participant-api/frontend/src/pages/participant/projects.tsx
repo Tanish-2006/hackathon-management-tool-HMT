@@ -22,12 +22,10 @@ export default function ParticipantProjects(){
   const [showMilestone,setShowMilestone]=useState(false);
   const [mForm,setMForm]=useState({ title:'', description:'', dueDate:'' });
 
-  // Hackathon-scoped context: a project belongs to one team in one hackathon.
   const ctx = useHackathonContext();
   const contextId = ctx.selectedId;
 
   useEffect(()=>{
-    // Never show another hackathon's project here while context resolves.
     setProject(null); setTeam(null); setMilestones([]); setGrantStatus(null);
     if(ctx.loading || !contextId) { setLoading(!ctx.loading); return; }
     let m=true;
@@ -52,7 +50,6 @@ export default function ParticipantProjects(){
           } else {
             setProject(null);
           }
-          // also handle milestones array in p.value
           if((p.value as any)?.milestones) setMilestones((p.value as any).milestones);
         }
       }catch(e){ if(m) setError(friendly(e)); }
@@ -70,7 +67,6 @@ export default function ParticipantProjects(){
         problemStatement: form.problemStatement || undefined,
         techStack: form.techStack.split(',').map(s=>s.trim()).filter(Boolean),
         repoUrl: form.repoUrl || undefined,
-        // Hackathon context so multi-hackathon participants upsert into the right team.
         hackathonId: contextId || undefined,
       };
       if(!team?.id) throw new Error('You must be in a team to create a project');
@@ -80,7 +76,6 @@ export default function ParticipantProjects(){
       } else {
         saved = await hmtBackendService.createProject(payload);
       }
-      // if backend returns {project: ...} unwrap
       const proj = (saved as any)?.project || saved;
       setProject(proj);
       setSuccess(project?.id ? 'Project updated' : 'Project created');
@@ -106,7 +101,6 @@ export default function ParticipantProjects(){
   if(loading) return <div className="space-y-4"><div className="h-24 animate-pulse rounded-2xl bg-[#e9e5da]"/><div className="h-64 animate-pulse rounded-2xl bg-[#e9e5da]"/></div>
   const hasProject = !!project?.id;
   const hasGrant = !!grantStatus?.hasAccess;
-  // Honest progress: derived from completed fields, never a fixed placeholder.
   const progress = !hasProject ? 0 : Math.round(
     ([project.title, project.description, project.problemStatement, (project.techStack||[]).length ? 'x' : '', project.repoUrl, milestones.length ? 'x' : ''].filter(Boolean).length / 6) * 100,
   );
@@ -115,9 +109,9 @@ export default function ParticipantProjects(){
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Project · overview</div>
+          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Project</div>
           <h1 className="mt-2 text-3xl font-bold tracking-[-.05em] text-[#171a2d]">Your build, crystallized.</h1>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-[#77798a]">Title, problem statement, tech stack, team and hackathon context — plus repository connection status that respects grants.</p>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-[#77798a]">What you're building, the problem it solves and your tech stack.</p>
         </div>
         <div className="flex gap-2">
           {hasProject ? <button onClick={()=>setEditing(v=>!v)} className="inline-flex items-center gap-2 rounded-xl border border-[#dedbd1] px-4 py-2 text-xs font-bold bg-white">{editing ? <X size={14}/> : <Edit3 size={14}/>} {editing ? 'Cancel edit' : 'Edit project'}</button> : <button onClick={()=>setEditing(true)} disabled={!!contextId && !ctx.selectedIsRegistered} title={contextId && !ctx.selectedIsRegistered ? 'Register for this hackathon first' : 'Create project'} className="inline-flex items-center gap-2 rounded-xl bg-[#171a2d] px-4 py-2 text-xs font-bold text-white disabled:opacity-40"><Plus size={14}/> Create project</button>}
@@ -128,12 +122,11 @@ export default function ParticipantProjects(){
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex gap-2"><AlertCircle size={16}/>{error}<button onClick={()=>setError(null)} className="ml-auto"><X size={14}/></button></div>}
       {success && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 flex gap-2"><Check size={16}/>{success}<button onClick={()=>setSuccess(null)} className="ml-auto"><X size={14}/></button></div>}
 
-      {/* Hackathon context: a project belongs to one team in one hackathon */}
       <div className="rounded-2xl border border-[#dedbd1] bg-[#f4f1e8] px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         {ctx.loading ? (
           <span className="text-xs text-[#77798a]">Loading hackathon context…</span>
         ) : !contextId ? (
-          <span className="text-xs text-[#55586a]">No hackathon context yet — <Link href="/participant/hackathons" className="font-bold underline">discover and register</Link> to unlock your project workspace.</span>
+          <span className="text-xs text-[#55586a]"><Link href="/participant/hackathons" className="font-bold underline">Register for a hackathon</Link> to start your project.</span>
         ) : (
           <>
             <label className="flex items-center gap-2 text-xs font-semibold text-[#55586a]">Hackathon
@@ -147,7 +140,7 @@ export default function ParticipantProjects(){
               </select>
             </label>
             {!ctx.selectedIsRegistered && (
-              <span className="text-xs text-[#55586a]">Not registered here — project actions unlock after registration. <Link href="/participant/hackathons" className="font-bold underline">Open Discover</Link></span>
+              <span className="text-xs text-[#55586a]">You're not registered for this hackathon. <Link href="/participant/hackathons" className="font-bold underline">Open Discover</Link></span>
             )}
           </>
         )}
@@ -175,13 +168,13 @@ export default function ParticipantProjects(){
             {editing ? (
               <form onSubmit={handleSave} className="space-y-4">
                 <h3 className="font-bold">{hasProject ? 'Edit project' : 'Create project'}</h3>
-                {!team?.id && <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800">You must be in a team — create or join one at Teams.</div>}
-                <label className="block text-xs font-semibold">Title *<input required value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))} placeholder="Afterimage — spatial web companion" className="mt-1 w-full rounded-xl border border-[#dedbd1] bg-white px-3 py-2.5 text-sm outline-none focus:border-[#f26a4f]"/></label>
+                {!team?.id && <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800">You need to be in a team first. Create or join one on the Teams page.</div>}
+                <label className="block text-xs font-semibold">Title *<input required value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))} placeholder="e.g. Campus food-waste tracker" className="mt-1 w-full rounded-xl border border-[#dedbd1] bg-white px-3 py-2.5 text-sm outline-none focus:border-[#f26a4f]"/></label>
                 <label className="block text-xs font-semibold">Description<textarea required value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} rows={3} placeholder="What you are building and why now." className="mt-1 w-full rounded-xl border border-[#dedbd1] bg-white px-3 py-2.5 text-sm outline-none focus:border-[#f26a4f]"/></label>
                 <label className="block text-xs font-semibold">Problem statement<textarea value={form.problemStatement} onChange={e=>setForm(f=>({...f,problemStatement:e.target.value}))} rows={3} placeholder="The specific problem and insight behind your build." className="mt-1 w-full rounded-xl border border-[#dedbd1] bg-white px-3 py-2.5 text-sm outline-none focus:border-[#f26a4f]"/></label>
                 <label className="block text-xs font-semibold">Tech stack (comma separated)<input value={form.techStack} onChange={e=>setForm(f=>({...f,techStack:e.target.value}))} placeholder="Next.js, Tailwind, Neo4j, Fastify" className="mt-1 w-full rounded-xl border border-[#dedbd1] bg-white px-3 py-2.5 text-sm outline-none focus:border-[#f26a4f]"/></label>
                 {(hackathon as any)?.repoRequirement !== 'DISABLED' && (
-                  <label className="block text-xs font-semibold">Repository URL {(hackathon as any)?.repoRequirement === 'REQUIRED' ? '* (required by this hackathon — one primary URL, set by the leader)' : '(optional — leader connects via GitHub flow for grants)'}<input value={form.repoUrl} onChange={e=>setForm(f=>({...f,repoUrl:e.target.value}))} placeholder="https://github.com/org/repo" required={(hackathon as any)?.repoRequirement === 'REQUIRED'} className="mt-1 w-full rounded-xl border border-[#dedbd1] bg-white px-3 py-2.5 text-sm outline-none focus:border-[#f26a4f]"/></label>
+                  <label className="block text-xs font-semibold">Repository URL {(hackathon as any)?.repoRequirement === 'REQUIRED' ? '* (required, set by the team leader)' : '(optional)'}<input value={form.repoUrl} onChange={e=>setForm(f=>({...f,repoUrl:e.target.value}))} placeholder="https://github.com/org/repo" required={(hackathon as any)?.repoRequirement === 'REQUIRED'} className="mt-1 w-full rounded-xl border border-[#dedbd1] bg-white px-3 py-2.5 text-sm outline-none focus:border-[#f26a4f]"/></label>
                 )}
                 <div className="flex gap-2 pt-2"><button disabled={saving} className="flex-1 rounded-xl bg-[#f26a4f] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50 flex items-center justify-center gap-2">{saving?<Loader2 size={16} className="animate-spin"/>:<Save size={16}/>} {saving?'Saving…':'Save project'}</button><button type="button" onClick={()=>setEditing(false)} className="rounded-xl border border-[#dedbd1] px-4 py-2.5 text-sm font-bold">Cancel</button></div>
               </form>
@@ -193,14 +186,14 @@ export default function ParticipantProjects(){
                 </div>
 
                 <div className="mt-6 grid gap-4">
-                  <div className="rounded-xl bg-[#f4f1e8] p-4"><div className="text-xs font-bold flex items-center gap-2"><Target size={14}/> Problem statement</div><p className="mt-2 text-sm leading-6 text-[#171a2d]">{project.problemStatement || 'No problem statement yet — add one to help judges and AI.'}</p></div>
+                  <div className="rounded-xl bg-[#f4f1e8] p-4"><div className="text-xs font-bold flex items-center gap-2"><Target size={14}/> Problem statement</div><p className="mt-2 text-sm leading-6 text-[#171a2d]">{project.problemStatement || 'No problem statement yet.'}</p></div>
                   <div className="rounded-xl bg-[#f4f1e8] p-4"><div className="text-xs font-bold">Tech stack</div><div className="mt-2 flex flex-wrap gap-1.5">{(project.techStack||[]).map((t:string)=><span key={t} className="rounded-full bg-white border border-[#dedbd1] px-2.5 py-1 text-xs font-semibold">{t}</span>)}{(project.techStack||[]).length===0 && <span className="text-xs text-[#77798a]">—</span>}</div></div>
                   <div className="rounded-xl border border-[#e5e1d7] p-4">
                     <div className="text-xs font-bold flex items-center gap-2"><Github size={14}/> Repository</div>
                     {hasGrant && project.repoUrl ? (
                       <a href={project.repoUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-[#5aafbd] underline">{project.repoUrl} <ExternalLink size={14}/></a>
                     ) : (
-                      <div className="mt-2 text-xs leading-5 text-[#77798a]">{project.repoUrl ? 'Repository connected but not granted — hidden until leader grants AI access. Shows as NOT CONNECTED to outsiders.' : 'No repository connected. Ask your team leader to connect via GitHub → grant.'}</div>
+                      <div className="mt-2 text-xs leading-5 text-[#77798a]">{project.repoUrl ? 'A repository is linked, but the AI does not have access yet.' : 'No repository linked yet. Your team leader can connect one.'}</div>
                     )}
                     <div className="mt-3 flex gap-2"><Link href="/participant/github" className="rounded-xl bg-[#171a2d] px-3 py-1.5 text-xs font-bold text-white">Manage GitHub</Link><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${hasGrant?'bg-emerald-100 text-emerald-700 border border-emerald-200':'bg-amber-100 text-amber-700 border border-amber-200'}`}>{hasGrant?'GRANTED':'NO GRANT'}</span></div>
                   </div>
@@ -226,7 +219,6 @@ export default function ParticipantProjects(){
                 <div className="flex justify-between rounded-lg bg-[#252941] px-3 py-2"><span className="text-[#9b9fb1]">Members</span><b>{team?.members?.length || 0}</b></div>
                 <div className="flex justify-between rounded-lg bg-[#252941] px-3 py-2"><span className="text-[#9b9fb1]">Hackathon</span><b className="truncate max-w-[140px]">{hackathon?.title || '—'}</b></div>
               </div>
-              <div className="mt-6 rounded-xl border border-[#2c3047] p-3 text-xs leading-5 text-[#b9bdca]"><ShieldCheck size={14} className="inline mr-1 text-[#5aafbd]"/> Permission-aware: repo URL hidden without grant. Never shows tokens. READ-ONLY to GitHub.</div>
             </div>
 
             <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6">
@@ -235,7 +227,7 @@ export default function ParticipantProjects(){
               <div className="mt-3 flex flex-wrap gap-1.5">{(hackathon?.phases||[]).map((p:any,i:number)=><span key={i} className="rounded-full bg-[#f4f1e8] px-2 py-1 text-[11px] font-bold">{p.name || p.status}</span>)}</div>
               <div className="mt-4 text-xs">
                 <div className="font-bold">Team access</div>
-                <div className="mt-2 space-y-1.5 text-[#77798a]">{(team?.members||[]).map((m:any)=><div key={m.id} className="flex justify-between border-b border-[#e5e1d7] py-1"><span>{m.user?.fullName || m.userId.slice(0,8)}</span><span className="font-mono text-[11px]">{m.role}</span></div>)}{(team?.members||[]).length===0 && <span>—</span>}</div>
+                <div className="mt-2 space-y-1.5 text-[#77798a]">{(team?.members||[]).map((m:any)=><div key={m.id} className="flex justify-between border-b border-[#e5e1d7] py-1"><span>{m.user?.fullName || 'Member'}</span><span className="font-mono text-[11px]">{m.role}</span></div>)}{(team?.members||[]).length===0 && <span>—</span>}</div>
               </div>
             </div>
           </div>

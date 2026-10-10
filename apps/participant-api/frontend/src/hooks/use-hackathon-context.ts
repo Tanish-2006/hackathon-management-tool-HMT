@@ -19,7 +19,6 @@ function writeStored(id: string | null) {
     if (id) localStorage.setItem(STORAGE_KEY, id);
     else localStorage.removeItem(STORAGE_KEY);
   } catch {
-    // persistence is best-effort; context still works in-memory
   }
 }
 
@@ -29,18 +28,6 @@ export interface HackathonOption {
   registered: boolean;
 }
 
-/**
- * Shared hackathon context for participant pages.
- *
- * A participant's team/project/progress are scoped to ONE hackathon, but the
- * backend "current hackathon" is a global pick and legacy /team/me +
- * /project/me are global. This hook resolves the effective context:
- * persisted selection (when still registered) → current-if-registered →
- * first registration → current (unregistered preview) → null.
- *
- * Stale selections (unregistered/deleted hackathons) fall back automatically
- * so one hackathon's team is never displayed as another's.
- */
 export function useHackathonContext() {
   const [current, setCurrent] = useState<any | null>(null);
   const [registrations, setRegistrations] = useState<any[]>([]);
@@ -74,7 +61,6 @@ export function useHackathonContext() {
         else next = cur?.id ? String(cur.id) : null;
         setSelectedId(next);
 
-        // Resolve titles for registered hackathons (bounded: registrations are few).
         const missing = (Array.isArray(list) ? list : [])
           .map((r: any) => String(r.hackathonId))
           .filter((id: string) => id !== String(cur?.id));
