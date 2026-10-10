@@ -12,6 +12,14 @@ import { loadBaseEnv, resolveSyncSecret } from '@hmt/config';
 import { defaultIdeationConfig, type IdeationConfig } from '@hmt/contracts';
 
 // Hackathon scalar fields mapped to review-section provenance keys.
+const DEFAULT_PHASE_PLAN = [
+  { name: 'registration', order: 1, description: 'Sign up and register for the event' },
+  { name: 'team_formation', order: 2, description: 'Create or join a team' },
+  { name: 'ideation', order: 3, description: 'Shape and iterate on your idea' },
+  { name: 'evaluation', order: 4, description: 'Judges review submissions' },
+  { name: 'results', order: 5, description: 'Winners announced' },
+];
+
 const PROVENANCE_FIELD_MAP: Record<string, string> = {
   title: 'title',
   description: 'description',
@@ -484,10 +492,8 @@ export class HackathonService {
     }
     const meta = (hackathon.metadata ?? {}) as Record<string, unknown>;
     const draft = (meta.draft ?? {}) as Record<string, unknown>;
-    const specs = (draft.phasesDraft ?? []) as Array<{ name: string; order: number; description?: string | null }>;
-    if (!Array.isArray(specs) || specs.length === 0) {
-      throw Object.assign(new Error('No AI phase suggestions to materialize for this hackathon'), { statusCode: 400 });
-    }
+    const drafted = (draft.phasesDraft ?? []) as Array<{ name: string; order: number; description?: string | null }>;
+    const specs = Array.isArray(drafted) && drafted.length > 0 ? drafted : DEFAULT_PHASE_PLAN;
     let dated;
     try {
       dated = normalizeTimeline(window.eventStart, window.eventEnd, specs);
