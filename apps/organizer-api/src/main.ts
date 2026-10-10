@@ -88,7 +88,9 @@ async function buildApp(): Promise<FastifyInstance> {
     if (config.isTest) return;
     // With trustProxy:true, req.ip is the correct client IP — do not trust
     // X-Forwarded-For directly (spoofable).
-    const key = req.ip ?? 'unknown';
+    const authorization = req.headers.authorization;
+    const caller = typeof authorization === 'string' && authorization.startsWith('Bearer ') ? authorization.slice(-32) : 'anon';
+    const key = `${req.ip ?? 'unknown'}:${caller}`;
     const now = Date.now();
     if (now - lastRateSweep > 30000 || rateMap.size > RATE_MAP_MAX) {
       lastRateSweep = now;

@@ -50,7 +50,7 @@ export default function OrganizerAnalytics(){
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Link href="/organizer/dashboard" className="rounded-xl border border-[#dedbd1] bg-[#fdfbf5] p-2"><ArrowLeft size={16}/></Link>
+        <Link href="/organizer/dashboard" aria-label="Back" title="Back" className="rounded-xl border border-[#dedbd1] bg-[#fdfbf5] p-2"><ArrowLeft size={16}/></Link>
         <div>
                     <h1 className="text-2xl font-bold">Analytics</h1>
         </div>

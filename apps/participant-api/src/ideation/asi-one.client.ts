@@ -10,6 +10,8 @@ export interface ChatMessage {
 export const AI_HELPER_NOT_CONFIGURED =
   "AI Helper isn't configured yet — ask the organizer to add the AI key. Your message has been saved, so you can keep writing down your thinking in the meantime.";
 
+export class AiBusyError extends Error {}
+
 class UpstreamError extends Error {
   constructor(readonly status: number) {
     super(`AI provider responded with ${status}`);
@@ -24,6 +26,8 @@ export class AsiOneClient {
   private readonly model: string;
   private readonly timeoutMs: number;
   private readonly maxConcurrency: number;
+  private readonly maxQueue: number;
+  private readonly queueTimeoutMs: number;
   private readonly waiters: Array<() => void> = [];
   private active = 0;
 
@@ -36,6 +40,12 @@ export class AsiOneClient {
     this.model = config.get<string>('AI_MODEL') || 'asi1';
     this.timeoutMs = Number(config.get('AI_TIMEOUT_MS')) || 90_000;
     this.maxConcurrency = Math.max(1, Number(config.get('AI_MAX_CONCURRENCY')) || 16);
+    this.maxQueue = Math.max(0, Number(config.get('AI_MAX_QUEUE')) || 200);
+    this.queueTimeoutMs = Math.max(1000, Number(config.get('AI_QUEUE_TIMEOUT_MS')) || 120_000);
+  }
+
+  get queueDepth(): number {
+    return this.waiters.length;
   }
 
   get configured(): boolean {
@@ -47,7 +57,7 @@ export class AsiOneClient {
       yield AI_HELPER_NOT_CONFIGURED;
       return;
     }
-    await this.acquire();
+    await this.acquire(signal);
     try {
       const timeout = AbortSignal.timeout(this.timeoutMs);
       const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
@@ -111,12 +121,30 @@ export class AsiOneClient {
     }
   }
 
-  private async acquire(): Promise<void> {
+  private async acquire(signal?: AbortSignal): Promise<void> {
     if (this.active < this.maxConcurrency) {
       this.active++;
       return;
     }
-    await new Promise<void>((resolve) => this.waiters.push(resolve));
+    if (this.waiters.length >= this.maxQueue) throw new AiBusyError('AI Helper queue is full');
+    await new Promise<void>((resolve, reject) => {
+      const leave = (error: Error) => {
+        const index = this.waiters.indexOf(enter);
+        if (index >= 0) this.waiters.splice(index, 1);
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        reject(error);
+      };
+      const enter = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      };
+      const onAbort = () => leave(new AiBusyError('Request cancelled while queued'));
+      const timer = setTimeout(() => leave(new AiBusyError('AI Helper queue wait timed out')), this.queueTimeoutMs);
+      signal?.addEventListener('abort', onAbort, { once: true });
+      this.waiters.push(enter);
+    });
   }
 
   private release(): void {

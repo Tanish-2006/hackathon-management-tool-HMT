@@ -39,7 +39,7 @@ export default function OrganizerAudit(){
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Link href="/organizer/dashboard" className="rounded-xl border border-[#dedbd1] bg-[#fdfbf5] p-2"><ArrowLeft size={16}/></Link>
+        <Link href="/organizer/dashboard" aria-label="Back" title="Back" className="rounded-xl border border-[#dedbd1] bg-[#fdfbf5] p-2"><ArrowLeft size={16}/></Link>
         <div>
                     <h1 className="text-2xl font-bold">Activity log</h1>
           <p className="text-xs text-[#77798a]">A record of every important change.</p>

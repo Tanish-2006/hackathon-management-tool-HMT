@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MinLength, IsOptional, Matches, Length } from 'class-validator';
+import { IsEmail, IsString, MinLength, MaxLength, Matches, Length } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 // E.164: leading +, country code, 8-15 digits total (ITU-T E.164).
@@ -15,10 +15,13 @@ export class RegisterDto {
   @ApiProperty({ example: 'Str0ngP@ssw0rd!', minLength: 8 })
   @IsString()
   @MinLength(8, { message: 'Password must be at least 8 characters' })
+  @MaxLength(128, { message: 'Password must be at most 128 characters' })
   password: string;
 
-  @ApiProperty({ example: 'Alex Doe' })
+  @ApiProperty({ example: 'Alex Doe', maxLength: 160 })
   @IsString()
+  @Matches(/\S/, { message: 'fullName must not be empty' })
+  @MaxLength(160, { message: 'fullName must be at most 160 characters' })
   fullName: string;
 
   @ApiProperty({
@@ -74,6 +77,7 @@ export class ResetPasswordDto {
   @ApiProperty({ example: 'NewStr0ngP@ss!', minLength: 8 })
   @IsString()
   @MinLength(8)
+  @MaxLength(128)
   newPassword: string;
 }
 

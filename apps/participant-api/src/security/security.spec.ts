@@ -1,12 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule } from '@nestjs/config';
-import { AuthService } from '../auth/auth.service';
+import { AuthService, REFRESH_REUSE_GRACE_MS } from '../auth/auth.service';
 import { PrismaService } from '../database/prisma.service';
 import { RedisService } from '../database/redis.service';
 import { PrivacyService } from '../privacy/privacy.service';
 import { VisibilityLevel } from '../common/enums/visibility.enum';
-import { UnauthorizedException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { UnauthorizedException, ForbiddenException, NotFoundException, ConflictException } from '@nestjs/common';
 
 describe('Participant Backend Comprehensive Security & Privacy Suite', () => {
   let authService: AuthService;
@@ -111,6 +111,17 @@ describe('Participant Backend Comprehensive Security & Privacy Suite', () => {
       expect(user.passwordHash.startsWith('$argon2id$')).toBe(true);
     });
 
+    it('should create exactly one account when the same email signs up concurrently', async () => {
+      const attempts = await Promise.allSettled(
+        ['+919800000101', '+919800000102', '+919800000103'].map((phoneNumber) =>
+          authService.register({ email: 'Race@Example.com', password: 'StrongPass123!', fullName: 'Race', phoneNumber }),
+        ),
+      );
+      expect(attempts.filter((a) => a.status === 'fulfilled')).toHaveLength(1);
+      expect(attempts.filter((a) => a.status === 'rejected').every((a: any) => a.reason instanceof ConflictException)).toBe(true);
+      expect(await prisma.user.findMany({ where: { email: 'race@example.com' } } as any)).toHaveLength(1);
+    });
+
     it('should issue short-lived JWT (15m) and rotating refresh tokens', async () => {
       const login = await authService.login({ email: 'alice.participant@example.com', password: 'StrongPass123!' });
       expect(login.accessToken).toBeDefined();
@@ -125,10 +136,31 @@ describe('Participant Backend Comprehensive Security & Privacy Suite', () => {
     it('should detect refresh token reuse and revoke family', async () => {
       const login = await authService.login({ email: 'bob.participant@example.com', password: 'StrongPass123!' });
       const firstRefresh = await authService.refreshToken(login.refreshToken);
-      // reuse old token should trigger reuse detection
+      const now = Date.now();
+      const clock = jest.spyOn(Date, 'now').mockReturnValue(now + REFRESH_REUSE_GRACE_MS + 1000);
+      try {
+        await expect(authService.refreshToken(login.refreshToken)).rejects.toThrow(UnauthorizedException);
+        await expect(authService.refreshToken(firstRefresh.refreshToken)).rejects.toThrow(UnauthorizedException);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+    it('should let two tabs refresh the same token concurrently without revoking the session', async () => {
+      const login = await authService.login({ email: 'bob.participant@example.com', password: 'StrongPass123!' });
+      const [tabA, tabB] = await Promise.all([
+        authService.refreshToken(login.refreshToken),
+        authService.refreshToken(login.refreshToken),
+      ]);
+      await expect(authService.refreshToken(tabA.refreshToken)).resolves.toHaveProperty('accessToken');
+      await expect(authService.refreshToken(tabB.refreshToken)).resolves.toHaveProperty('accessToken');
+    });
+
+    it('should not honour the grace window after logout', async () => {
+      const login = await authService.login({ email: 'bob.participant@example.com', password: 'StrongPass123!' });
+      const rotated = await authService.refreshToken(login.refreshToken);
+      await authService.logout(login.user.id, rotated.refreshToken);
       await expect(authService.refreshToken(login.refreshToken)).rejects.toThrow(UnauthorizedException);
-      // subsequent use of new token after reuse should also fail because family revoked
-      await expect(authService.refreshToken(firstRefresh.refreshToken)).rejects.toThrow(UnauthorizedException);
     });
 
     it('should handle email verification architecture', async () => {

@@ -16,10 +16,7 @@ export class SyncService {
   async consumePublishedEvent(event: unknown) {
     const parsed = hackathonPublishedSchema.safeParse(event);
     if (!parsed.success) {
-      throw Object.assign(new Error('Invalid HackathonPublished event'), {
-        status: 400,
-        details: parsed.error.issues,
-      });
+      throw new BadRequestException({ message: 'Invalid HackathonPublished event', details: parsed.error.issues });
     }
     const evt = parsed.data;
     const existing = await this.prisma.consumedEvent.findUnique({
@@ -102,13 +99,15 @@ export class SyncService {
     // POST /sync/consume-batch endpoint enforces a stricter 100.
     const MAX_BATCH = 200;
     if (!Array.isArray(events)) {
-      throw Object.assign(new Error('Invalid batch: events must be an array'), { status: 400 });
+      throw new BadRequestException('Invalid batch: events must be an array');
     }
     if (events.length > MAX_BATCH) {
-      throw Object.assign(new Error(`Invalid batch: max ${MAX_BATCH} events per request`), { status: 400 });
+      throw new BadRequestException(`Invalid batch: max ${MAX_BATCH} events per request`);
     }
+    const occurredAt = (event: any) => Date.parse(event?.occurredAt) || 0;
+    const chronological = [...events].sort((a, b) => occurredAt(a) - occurredAt(b));
     const results: Array<Record<string, unknown>> = [];
-    for (const e of events) {
+    for (const e of chronological) {
       try {
         results.push({ ok: true, ...(await this.consume(e)) });
       } catch (err: any) {
@@ -123,7 +122,7 @@ export class SyncService {
     const type = (event as any)?.type;
     if (type === 'HackathonArchived') return this.consumeArchivedEvent(event);
     if (type === 'HackathonPublished') return this.consumePublishedEvent(event);
-    throw Object.assign(new Error(`Unsupported event type: ${String(type ?? 'unknown')}`), { status: 400 });
+    throw new BadRequestException(`Unsupported event type: ${String(type ?? 'unknown')}`);
   }
 
   /**
@@ -135,10 +134,7 @@ export class SyncService {
   async consumeArchivedEvent(event: unknown) {
     const parsed = hackathonArchivedSchema.safeParse(event);
     if (!parsed.success) {
-      throw Object.assign(new Error('Invalid HackathonArchived event'), {
-        status: 400,
-        details: parsed.error.issues,
-      });
+      throw new BadRequestException({ message: 'Invalid HackathonArchived event', details: parsed.error.issues });
     }
     const evt = parsed.data;
     const existing = await this.prisma.consumedEvent.findUnique({

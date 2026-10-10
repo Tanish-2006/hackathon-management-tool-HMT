@@ -46,7 +46,7 @@ export default function OrganizerFeedback(){
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Link href="/organizer/dashboard" className="rounded-xl border border-[#dedbd1] bg-[#fdfbf5] p-2"><ArrowLeft size={16}/></Link>
+        <Link href="/organizer/dashboard" aria-label="Back" title="Back" className="rounded-xl border border-[#dedbd1] bg-[#fdfbf5] p-2"><ArrowLeft size={16}/></Link>
         <div>
                     <h1 className="text-2xl font-bold">Feedback</h1>
           <p className="text-xs text-[#77798a]">Review mentor feedback, then publish it to participants.</p>

@@ -107,6 +107,50 @@ describe('team formation — registration gate + privacy', () => {
     expect(t.maxMembers).toBe(3);
   });
 
+  it('concurrent creates with the same name in one hackathon yield exactly one team', async () => {
+    const a = await makeUser('twin-a@hmt.test');
+    const b = await makeUser('twin-b@hmt.test');
+    await makeHackathon('hack-twin');
+    await register(a, 'hack-twin');
+    await register(b, 'hack-twin');
+    const results = await Promise.allSettled([
+      teams.createTeam(reqFor(a) as any, { name: 'Twin', hackathonId: 'hack-twin' } as any),
+      teams.createTeam(reqFor(b) as any, { name: 'twin', hackathonId: 'hack-twin' } as any),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(await prisma.team.findMany({ where: { hackathonId: 'hack-twin' } } as any)).toHaveLength(1);
+  });
+
+  it('one user joining two teams of the same hackathon concurrently ends up in exactly one', async () => {
+    const [x, y, racer] = await Promise.all(['jx@hmt.test', 'jy@hmt.test', 'jr@hmt.test'].map(makeUser));
+    await makeHackathon('hack-dbl');
+    await Promise.all([x, y, racer].map((u) => register(u, 'hack-dbl')));
+    const tx: any = await teams.createTeam(reqFor(x) as any, { name: 'X', hackathonId: 'hack-dbl' } as any);
+    const ty: any = await teams.createTeam(reqFor(y) as any, { name: 'Y', hackathonId: 'hack-dbl' } as any);
+    const results = await Promise.allSettled(
+      [tx, ty].map((t) =>
+        teams.joinByCode(reqFor(racer) as any, { teamName: t.name, tid: t.inviteCode, hackathonId: 'hack-dbl' } as any),
+      ),
+    );
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(await prisma.teamMember.findMany({ where: { userId: racer } } as any)).toHaveLength(1);
+  });
+
+  it('registration after the organizer deadline is rejected but stays idempotent for existing registrants', async () => {
+    const early = await makeUser('early@hmt.test');
+    const late = await makeUser('late@hmt.test');
+    await (prisma.hackathon as any).create({
+      data: { id: 'hack-closed', title: 'Closed', description: 'd', status: 'PUBLISHED', registrationEnd: new Date(Date.now() - 60_000).toISOString() },
+    });
+    const existing = await register(early, 'hack-closed');
+    for (const uid of [early, late]) {
+      await prisma.user.update({ where: { id: uid }, data: { isPhoneVerified: true } } as any);
+      await (prisma as any).skillProfile.upsert({ where: { userId: uid }, update: {}, create: { userId: uid, programmingLanguages: ['TS'] } });
+    }
+    await expect(hackathons.register(reqFor(late) as any, 'hack-closed', {})).rejects.toThrow(/Registration is closed/);
+    expect((await hackathons.register(reqFor(early) as any, 'hack-closed', {})).id).toBe(existing.id);
+  });
+
   it('second team creation while in a team is rejected', async () => {
     const uid = await makeUser('multi@hmt.test');
     await makeHackathon('hack-pub');

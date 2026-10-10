@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, Body, Controller, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { resolveSyncSecret } from '@hmt/config';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -33,11 +33,11 @@ export class SyncController {
   @UseGuards(SyncAuthGuard)
   async consumeBatch(@Body() body: { events: unknown[] }) {
     if (!body || !Array.isArray((body as any)?.events)) {
-      throw Object.assign(new Error('Invalid batch: events must be an array'), { status: 400 });
+      throw new BadRequestException('Invalid batch: events must be an array');
     }
     const events = (body as any).events as unknown[];
     if (events.length > 100) {
-      throw Object.assign(new Error('Invalid batch: max 100 events per request'), { status: 400 });
+      throw new BadRequestException('Invalid batch: max 100 events per request');
     }
     return { results: await this.sync.consumeMany(events) };
   }
@@ -61,10 +61,10 @@ export class SyncController {
     try {
       parsed = new URL(base);
     } catch {
-      throw Object.assign(new Error('Invalid organizerBaseUrl'), { status: 400 });
+      throw new BadRequestException('Invalid organizerBaseUrl');
     }
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw Object.assign(new Error('Invalid organizerBaseUrl: only http(s) allowed'), { status: 400 });
+      throw new BadRequestException('Invalid organizerBaseUrl: only http(s) allowed');
     }
     const host = parsed.hostname.toLowerCase();
     const isLoopback =
@@ -81,14 +81,14 @@ export class SyncController {
     const isMetadata = host === '169.254.169.254' || host === 'metadata.google.internal';
     // Cloud metadata is never allowed (secret would leak to it).
     if (isMetadata) {
-      throw Object.assign(new Error('Invalid organizerBaseUrl: private/internal hosts are not allowed'), { status: 400 });
+      throw new BadRequestException('Invalid organizerBaseUrl: private/internal hosts are not allowed');
     }
     const isCallerSupplied = Boolean(body?.organizerBaseUrl);
     if (isCallerSupplied && (isLoopback || isPrivateNet)) {
       // Caller-supplied URLs must be public — prevents SSRF to internal
       // services and prevents the server secret reaching attacker hosts
       // that resolve to internal addresses.
-      throw Object.assign(new Error('Invalid organizerBaseUrl: private/internal hosts are not allowed'), { status: 400 });
+      throw new BadRequestException('Invalid organizerBaseUrl: private/internal hosts are not allowed');
     }
     const rawLimit = Number((body as any)?.limit ?? 50);
     const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 200) : 50;
@@ -108,14 +108,11 @@ export class SyncController {
         },
       });
     } catch (e) {
-      throw Object.assign(
-        new Error(`Organizer outbox fetch failed: ${e instanceof Error ? e.message : String(e)}`),
-        { status: 502 },
-      );
+      throw new BadGatewayException(`Organizer outbox fetch failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       clearTimeout(timer);
     }
-    if (!res.ok) throw Object.assign(new Error(`Organizer outbox fetch failed: ${res.status}`), { status: 502 });
+    if (!res.ok) throw new BadGatewayException(`Organizer outbox fetch failed: ${res.status}`);
     const json: any = await res.json().catch(() => null);
     const outbox: any[] = Array.isArray(json?.data)
       ? json.data

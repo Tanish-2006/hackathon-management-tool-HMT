@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { SyncService } from './sync.service';
 import { SyncAuthGuard } from './sync-auth.guard';
@@ -69,6 +70,14 @@ describe('SyncService — organizer push ingestion', () => {
     expect(stored.status).toBe('ARCHIVED');
   });
 
+  it('applies a newest-first outbox batch chronologically so archived hackathons stay archived', async () => {
+    const published = { ...publishedEvent('hack-2', 'evt-p'), occurredAt: '2026-10-01T10:00:00.000Z' };
+    const archived = { ...archivedEvent('hack-2', 'evt-a'), occurredAt: '2026-10-01T11:00:00.000Z' };
+    await sync.consumeMany([archived, published]);
+    const stored = await (prisma.hackathon as any).findUnique({ where: { id: 'hack-2' } });
+    expect(stored.status).toBe('ARCHIVED');
+  });
+
   it('acknowledges archived events for unknown ids without fabricating records', async () => {
     const res: any = await sync.consume(archivedEvent('ghost', 'evt-9'));
     expect(res.hackathonId).toBe('ghost');
@@ -77,7 +86,7 @@ describe('SyncService — organizer push ingestion', () => {
   });
 });
 
-describe('SyncAuthGuard — shared secret or JWT', () => {
+describe('SyncAuthGuard — shared secret only', () => {
   const SECRET = 'test-sync-secret-32-chars-minimum!!';
 
   beforeEach(() => {
@@ -92,15 +101,19 @@ describe('SyncAuthGuard — shared secret or JWT', () => {
     return { switchToHttp: () => ({ getRequest: () => ({ headers }) }) };
   }
 
-  it('accepts the correct shared secret without a JWT', async () => {
-    const guard = new SyncAuthGuard();
-    await expect(guard.canActivate(ctxWith({ 'x-sync-secret': SECRET }))).resolves.toBe(true);
+  it('accepts the correct shared secret', () => {
+    expect(new SyncAuthGuard().canActivate(ctxWith({ 'x-sync-secret': SECRET }))).toBe(true);
   });
 
-  it('does not accept a wrong or missing secret on its own', async () => {
+  it('rejects a wrong or missing secret', () => {
     const guard = new SyncAuthGuard();
-    // Falls through to the JWT path, which fails without a valid token.
-    await expect(guard.canActivate(ctxWith({ 'x-sync-secret': 'wrong' }))).rejects.toThrow();
-    await expect(guard.canActivate(ctxWith({}))).rejects.toThrow();
+    expect(() => guard.canActivate(ctxWith({ 'x-sync-secret': 'wrong' }))).toThrow(UnauthorizedException);
+    expect(() => guard.canActivate(ctxWith({}))).toThrow(UnauthorizedException);
+  });
+
+  it('rejects any bearer token without the secret, so self-registered organizers cannot forge sync events', () => {
+    expect(() => new SyncAuthGuard().canActivate(ctxWith({ authorization: 'Bearer organizer.jwt.token' }))).toThrow(
+      UnauthorizedException,
+    );
   });
 });

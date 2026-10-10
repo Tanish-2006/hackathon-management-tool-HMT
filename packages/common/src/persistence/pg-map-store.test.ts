@@ -67,6 +67,22 @@ describe('PgMapStore dirty tracking', () => {
     expect(pool.deletes).toEqual([['u1']]);
   });
 
+  it('skips re-serializing immutable collections on full diffs but still saves new and replaced entries', async () => {
+    const store = new PgMapStore('postgres://unused', 'test');
+    const pool = new FakePool();
+    (store as unknown as { pool: FakePool }).pool = pool;
+    const messages = new Map<string, any>();
+    await store.attachMap('messages', messages, { immutable: true });
+    messages.set('m1', { id: 'm1', text: 'a' });
+    await store.flush();
+    const serialize = vi.spyOn(PgMapStore, 'serialize');
+    await store.flush(true);
+    expect(serialize).not.toHaveBeenCalled();
+    messages.set('m2', { id: 'm2', text: 'b' });
+    await store.close();
+    expect(pool.upserts).toEqual([['{"id":"m1","text":"a"}'], ['{"id":"m2","text":"b"}']]);
+  });
+
   it('persists in-place mutations on the full diff run by close()', async () => {
     const { store, pool, users } = await storeWithFakePool();
     users.set('u1', { id: 'u1', name: 'A' });

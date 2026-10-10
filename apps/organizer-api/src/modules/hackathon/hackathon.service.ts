@@ -859,7 +859,7 @@ export class HackathonService {
       memoryStore.hackathons.set(id, updated);
       // Best-effort push to the participant read-model; never fails the transition.
       void this.pushToParticipant('/sync/consume', 'POST', event)
-        .then((delivered) => (delivered && updated.ideation ? this.pushIdeation(id, updated.ideation) : false))
+        .then((delivered) => (delivered && updated.ideation ? this.pushIdeation(id) : false))
         .catch(() => undefined);
     }
 
@@ -893,14 +893,27 @@ export class HackathonService {
       requestId: opts?.requestId ?? null,
       metadata: { fromRound: previousRound, toRound: ideation.currentRound },
     });
-    if (hackathon.status === 'PUBLISHED' && !(await this.pushIdeation(id, ideation))) {
+    if (hackathon.status === 'PUBLISHED' && !(await this.pushIdeation(id))) {
       throw Object.assign(new Error('Saved, but the participant app did not receive the update. Retry to sync.'), { statusCode: 502 });
     }
     return ideation;
   }
 
-  private pushIdeation(id: string, ideation: IdeationConfig): Promise<boolean> {
-    return this.pushToParticipant(`/sync/ideation/${encodeURIComponent(id)}`, 'PUT', ideation);
+  private readonly ideationPushes = new Map<string, Promise<boolean>>();
+
+  private pushIdeation(id: string): Promise<boolean> {
+    const push = (this.ideationPushes.get(id) ?? Promise.resolve(true))
+      .catch(() => false)
+      .then(() => {
+        const latest = memoryStore.hackathons.get(id)?.ideation;
+        return latest ? this.pushToParticipant(`/sync/ideation/${encodeURIComponent(id)}`, 'PUT', latest) : false;
+      })
+      .catch(() => false);
+    this.ideationPushes.set(id, push);
+    void push.then(() => {
+      if (this.ideationPushes.get(id) === push) this.ideationPushes.delete(id);
+    });
+    return push;
   }
 
   private requireOwnedHackathon(id: string, userId: string): Hackathon {
