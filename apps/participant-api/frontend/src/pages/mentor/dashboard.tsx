@@ -22,20 +22,18 @@ export default function MentorDashboard(){
         const meData = await organizerApi.getMe();
         if(!m) return; setMe(meData);
         const mentorId = (meData as any).id || (meData as any).user?.id;
-        if(!mentorId){ setError('Could not resolve mentor id'); return}
-        // fetch assigned teams
+        if(!mentorId){ setError('Could not load your mentor account.'); return}
         const list = await organizerApi.listMentorTeams(mentorId).catch(()=>[]);
         if(!m) return; setTeams(list);
         if(list[0]?.hackathonId){
           try{ const h=await organizerApi.getHackathon(list[0].hackathonId); if(m) setHackathon(h)}catch{}
         } else {
-          // fallback: try to list hackathons (mentor sees published)
           try{ const hs=await organizerApi.listHackathons(); if(m && hs[0]) setHackathon(hs[0])}catch{}
         }
       }catch(e:any){
         if(!m) return;
-        if(e instanceof OrganizerApiError && e.status===401) setError('Session expired — sign in as MENTOR.');
-        else if(e instanceof OrganizerApiError && e.status===403) setError('Only MENTOR/ADMIN can view assigned teams. You are not a mentor.');
+        if(e instanceof OrganizerApiError && e.status===401) setError('Your session expired. Please sign in again.');
+        else if(e instanceof OrganizerApiError && e.status===403) setError('This page is for mentors.');
         else setError(e.message)
       } finally{ if(m) setLoading(false)}
     }
@@ -51,14 +49,14 @@ export default function MentorDashboard(){
         <div>
           <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Mentor workspace</div>
           <h1 className="mt-2 text-3xl font-bold tracking-[-.05em]">Your teams, your impact.</h1>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-[#77798a]">Assigned teams via GET /mentors/:mentorId/teams · Hackathon context · Precision feedback workflow.</p>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-[#77798a]">The teams you mentor and the feedback you give.</p>
         </div>
         <Link href="/mentor/feedback" className="inline-flex items-center gap-2 rounded-xl bg-[#171a2d] px-4 py-3 text-sm font-bold text-white hover:bg-[#252941]">Submit feedback <ArrowRight size={14}/></Link>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-5"><div className="flex items-center justify-between"><span className="font-mono text-[10px] uppercase tracking-wider text-[#77798a]">Mentor</span><ShieldCheck size={14} className="text-[#5aafbd]"/></div><div className="mt-3 font-bold">{me?.email || me?.user?.email || '—'} </div><div className="text-xs text-[#77798a]">{me?.role || me?.user?.role || '—'} · Id {((me?.id || me?.user?.id || '') as string).slice(0,8)}</div></div>
-        <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-5"><div className="font-mono text-[10px] uppercase tracking-wider text-[#77798a]">Assigned teams</div><div className="mt-3 text-2xl font-bold">{teams.length}</div><div className="text-xs text-[#77798a]">GET /mentors/:id/teams</div></div>
+        <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-5"><div className="flex items-center justify-between"><span className="font-mono text-[10px] uppercase tracking-wider text-[#77798a]">Mentor</span><ShieldCheck size={14} className="text-[#5aafbd]"/></div><div className="mt-3 font-bold">{me?.email || me?.user?.email || '—'} </div><div className="text-xs text-[#77798a]">Mentor</div></div>
+        <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-5"><div className="font-mono text-[10px] uppercase tracking-wider text-[#77798a]">Assigned teams</div><div className="mt-3 text-2xl font-bold">{teams.length}</div></div>
         <div className="rounded-2xl bg-[#d8e35b] p-5"><div className="font-mono text-[10px] uppercase tracking-wider text-[#596027]">Hackathon</div><div className="mt-2 font-bold text-[#171a2d] line-clamp-1">{hackathon?.title || 'No hackathon yet'}</div><div className="text-xs text-[#596027]">{hackathon?.status || '—'} · {hackathon?.mode || ''}</div></div>
       </div>
 
@@ -71,7 +69,7 @@ export default function MentorDashboard(){
                 <motion.div key={t.id || i} initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} transition={{delay:i*0.04}} className="flex items-center gap-3 rounded-xl border border-[#e5e1d7] bg-white p-4 hover:-translate-y-0.5 transition-transform">
                   <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#e9e5da] text-xs font-bold">{(t.name || 'TE').slice(0,2).toUpperCase()}</span>
                   <div className="min-w-0 flex-1">
-                    <div className="font-bold text-sm line-clamp-1">{t.name || `Team ${String(t.id).slice(0,8)}`}</div>
+                    <div className="font-bold text-sm line-clamp-1">{t.name || 'Unnamed team'}</div>
                     <div className="text-xs text-[#77798a]">{t.memberCount ?? t.members?.length ?? 0} members · {t.project?.title ? `Project: ${t.project.title}` : 'No project yet'}</div>
                   </div>
                   <Link href="/mentor/feedback" className="rounded-full bg-[#f26a4f] px-3 py-1.5 text-xs font-bold text-white">Feedback</Link>
@@ -82,7 +80,7 @@ export default function MentorDashboard(){
             <div className="mt-4 rounded-xl bg-[#f4f1e8] p-6 text-center">
               <div className="mx-auto grid h-10 w-10 place-items-center rounded-xl bg-[#e9e5da]"><Layers size={18}/></div>
               <h4 className="mt-3 font-bold">No teams assigned yet</h4>
-              <p className="mt-1 text-sm text-[#77798a]">An organizer must assign you via POST /hackathons/:id/mentor-assignments. Then teams appear here.</p>
+              <p className="mt-1 text-sm text-[#77798a]">Teams appear here once an organizer assigns you.</p>
               <Link href="/organizer/mentors" className="mt-3 inline-flex text-xs font-bold text-[#f26a4f]">Organizer view →</Link>
             </div>
           )}
@@ -114,7 +112,7 @@ export default function MentorDashboard(){
           <div className="rounded-2xl bg-[#171a2d] p-6 text-[#fdfbf5]">
             <div className="font-mono text-[10px] uppercase tracking-[.16em] text-[#d8e35b]">Your guidance</div>
             <h3 className="mt-2 font-bold">Score with clarity.</h3>
-            <p className="mt-2 text-sm leading-6 text-[#b9bdca]">Use the feedback form to share score, remarks, reason, strengths, weaknesses, technical & product feedback, recommendation.</p>
+            <p className="mt-2 text-sm leading-6 text-[#b9bdca]">Share a score, what went well, and what to improve.</p>
             <Link href="/mentor/feedback" className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#d8e35b] px-3 py-2 text-xs font-bold text-[#171a2d]">Open feedback <ArrowRight size={14}/></Link>
           </div>
         </div>

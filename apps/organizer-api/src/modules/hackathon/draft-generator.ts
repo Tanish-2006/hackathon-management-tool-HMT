@@ -1,30 +1,14 @@
 import type { HackathonDraft, HackathonDraftInput, HackathonResource } from '../../domain/types';
 import { randomUUID } from 'crypto';
 
-/**
- * HackathonDraftGenerator abstraction - provider-agnostic.
- * Should eventually support an AI provider (OpenAI, Anthropic, etc.).
- * Currently implements deterministic Mock generation for testing.
- *
- * CRITICAL: AI-generated draft MUST NOT automatically publish. The caller must
- * explicitly transition through REVIEW → CONFIRMED → PUBLISHED.
- */
-
-export abstract class HackathonDraftGenerator {
-  abstract generateDraft(input: HackathonDraftInput): Promise<HackathonDraft>;
-  abstract getProviderName(): string;
-}
-
 export interface DraftGeneratorOptions {
   provider?: string;
   model?: string;
 }
 
 // Mock AI implementation - deterministic, no external calls
-export class MockAIDraftGenerator extends HackathonDraftGenerator {
-  constructor(private readonly options: DraftGeneratorOptions = {}) {
-    super();
-  }
+export class MockAIDraftGenerator {
+  constructor(private readonly options: DraftGeneratorOptions = {}) {}
 
   getProviderName(): string {
     return this.options.provider ?? 'mock-ai';
@@ -115,20 +99,5 @@ export class MockAIDraftGenerator extends HackathonDraftGenerator {
       .map((s) => s.trim())
       .filter(Boolean);
     return parts.length ? parts : fallback;
-  }
-}
-
-// Provider-agnostic factory
-export class DraftGeneratorFactory {
-  static create(provider: string = 'mock'): HackathonDraftGenerator {
-    switch (provider.toLowerCase()) {
-      case 'mock':
-      case 'mock-ai':
-        return new MockAIDraftGenerator({ provider: 'mock-ai' });
-      // Future: add OpenAI, Anthropic, etc.
-      // case 'openai': return new OpenAIAdapter(...)
-      default:
-        return new MockAIDraftGenerator({ provider });
-    }
   }
 }

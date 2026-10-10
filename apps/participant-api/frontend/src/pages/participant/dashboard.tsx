@@ -60,22 +60,17 @@ export default function ParticipantDashboard() {
         ]);
         if (!mounted) return;
         const hv = h.status === 'fulfilled' ? (h.value as any) : null;
-        // A rejected hackathon fetch is a real failure (auth/network/server) —
-        // surface it instead of masquerading as "no hackathon published yet".
-        // Genuine emptiness resolves successfully with null.
         if (h.status === 'rejected') {
           if (mounted) setError(friendlyError(h.reason));
           if (mounted) setLoading(false);
           return;
         }
         setHackathon(hv);
-        // Registration + AI availability (backend-derived, operational home only).
         if (hv?.id) {
           hmtBackendService.getMyRegistrations().then((regs:any)=>{
             const list = Array.isArray(regs)?regs:(regs?.data??[]);
             const reg = list.find((r:any)=>r.hackathonId===hv.id) ?? null;
             if(mounted) setRegistration(reg);
-            // Timeline feeds the progress card only — skip it until registered.
             if (reg) hmtBackendService.getTimeline().then((t)=>{ if(mounted) setTimeline(t); }).catch(()=>null);
           }).catch(()=>null);
           hmtBackendService.getAiAccessStatus().then(r=>{ if(mounted) setAiAccess(r); }).catch(()=>null);
@@ -83,7 +78,6 @@ export default function ParticipantDashboard() {
 
         if (t.status === 'fulfilled') {
           const teamData = (t.value as any)?.team ?? t.value;
-          // normalize: backend returns team or {team:null}
           if (teamData && teamData.id) setTeam(teamData);
           else if ((t.value as any)?.id) setTeam(t.value);
           else setTeam(teamData || null);
@@ -95,8 +89,6 @@ export default function ParticipantDashboard() {
             hmtBackendService.checkRepositoryAccess(p.id).then(r=> setRepoStatus(r as any)).catch(()=> setRepoStatus({ hasAccess:false }));
           }
         }
-        // (Timeline loads inside the registration callback above — it feeds
-        // the progress card, which stays locked until registered.)
       } catch (e) { if (mounted) setError(friendlyError(e)); }
       finally { if (mounted) setLoading(false); }
     }
@@ -109,10 +101,6 @@ export default function ParticipantDashboard() {
   const daysLeft = hackathon?.endDate ? Math.max(0, Math.ceil((new Date(hackathon.endDate).getTime() - Date.now())/86400000)) : null;
   const hasTeam = !!team && !!team.id;
   const hasProject = !!project && !!project.id;
-  // Participant state machine (real backend state, never faked):
-  // - no hackathon          → discover to get started
-  // - hackathon, unregistered → register CTA; team/project/progress locked
-  // - registered            → contextual team/project/progress workflow
   const isRegistered = !!registration;
 
   if (loading) {
@@ -129,15 +117,14 @@ export default function ParticipantDashboard() {
 
   return (
     <div className="space-y-8">
-      {/* Header — operational home: what do I need to do right now? */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Home — what needs you now</div>
+          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Home</div>
           <h1 className="mt-2 text-3xl font-bold tracking-[-.05em] text-[#171a2d] sm:text-[36px]">Your hackathon, in motion.</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-[#77798a]">
             {hackathon
               ? `${hackathon.derivedStatus ?? 'Published'} · ${registration ? 'Registered' : 'Not registered yet'} · ${hasTeam ? 'In a team' : 'No team yet'} · AI ${aiAccess?.allowed ? 'available' : 'locked'}`
-              : 'Discover a published hackathon to begin.'}
+              : 'Find a hackathon to get started.'}
           </p>
         </div>
         <div className="flex gap-2">
@@ -145,10 +132,9 @@ export default function ParticipantDashboard() {
         </div>
       </div>
       {hackathon && !registration && (
-        <div className="rounded-2xl border border-[#f26a4f]/30 bg-[#fff7ea] p-4 text-sm"><b>Next action:</b> register for {hackathon.title} — your skill profile is reused, no repeated forms.</div>
+        <div className="rounded-2xl border border-[#f26a4f]/30 bg-[#fff7ea] p-4 text-sm"><b>Next action:</b> register for {hackathon.title}.</div>
       )}
 
-      {/* Registered hackathon status strip — compact. Full event detail lives on Discover. */}
       {hackathon && registration ? (
         <Card className="p-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -168,25 +154,23 @@ export default function ParticipantDashboard() {
         <Card className="p-8 text-center">
           <div className="mx-auto grid h-10 w-10 place-items-center rounded-xl bg-[#f4f1e8]"><Layers size={18}/></div>
           <h3 className="mt-3 font-bold">Discover a hackathon to get started</h3>
-          <p className="mx-auto mt-1 max-w-md text-sm text-[#77798a]">You&apos;re not registered for a hackathon yet. When organizers publish a hackathon, it appears in Discover — register there to unlock your team, project and AI teammate.</p>
+          <p className="mx-auto mt-1 max-w-md text-sm text-[#77798a]">You&apos;re not registered for a hackathon yet. Find one in Discover and register to set up your team and project.</p>
           <Link href="/participant/hackathons" className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#171a2d] px-4 py-2 text-xs font-bold text-white">Discover hackathons <ArrowRight size={14}/></Link>
         </Card>
       ) : null}
 
-      {/* Team / Project / Deadlines grid */}
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Team */}
         <Card className="p-6">
           <div className="flex items-center justify-between"><h3 className="font-bold tracking-tight flex items-center gap-2"><Users size={16} className="text-[#f26a4f]"/> Your team</h3><Badge tone={hasTeam && isRegistered ? 'lime' : 'muted'}>{hasTeam && isRegistered ? 'ACTIVE' : 'NO TEAM'}</Badge></div>
           {!isRegistered ? (
             <div className="mt-4">
-              <p className="text-sm leading-6 text-[#77798a]">Team formation unlocks after you register for a hackathon.</p>
+              <p className="text-sm leading-6 text-[#77798a]">Register for a hackathon to form a team.</p>
               <Link href="/participant/hackathons" className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#f26a4f] px-4 py-2 text-xs font-bold text-white">Discover & register <ArrowRight size={14}/></Link>
             </div>
           ) : hasTeam ? (
             <div className="mt-4">
               <div className="text-lg font-bold">{team.name}</div>
-              <div className="mt-1 text-xs text-[#77798a]">{team.members?.length || team._count?.members || '—'} members · {team.visibility || 'TEAM_DISCOVERABLE'}</div>
+              <div className="mt-1 text-xs text-[#77798a]">{team.members?.length || team._count?.members || '—'} members · {team.isDiscoverable === false ? 'Private' : 'Open to join'}</div>
               <div className="mt-4 flex -space-x-2">
                 {(team.members || []).slice(0,6).map((m:any, i:number)=> (
                   <span key={m.id || i} className="grid h-8 w-8 place-items-center rounded-full border-2 border-white bg-[#5aafbd] text-[11px] font-bold text-[#171a2d]">{(m.user?.fullName || m.userId || '?').slice(0,2).toUpperCase()}</span>
@@ -206,14 +190,13 @@ export default function ParticipantDashboard() {
           )}
         </Card>
 
-        {/* Project */}
         <Card className="p-6">
           <div className="flex items-center justify-between"><h3 className="font-bold flex items-center gap-2"><FileText size={16} className="text-[#5aafbd]"/> Your project</h3>
             <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${repoStatus?.hasAccess && isRegistered ? 'bg-[#d8e35b] text-[#171a2d]' : 'bg-[#e9e5da] text-[#77798a]'}`}>{repoStatus?.hasAccess && isRegistered ? 'CONNECTED' : 'NOT CONNECTED'}</span>
           </div>
           {!isRegistered ? (
             <div className="mt-4">
-              <p className="text-sm leading-6 text-[#77798a]">Your project workspace unlocks after registration — no placeholder progress until then.</p>
+              <p className="text-sm leading-6 text-[#77798a]">Register for a hackathon to start your project.</p>
               <Link href="/participant/hackathons" className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#171a2d] px-4 py-2 text-xs font-bold text-white">Discover & register <ArrowRight size={14}/></Link>
             </div>
           ) : hasProject ? (
@@ -238,13 +221,12 @@ export default function ParticipantDashboard() {
           )}
         </Card>
 
-        {/* Tasks / Evaluation preview */}
         <DarkCard className="p-6">
           <div className="font-mono text-[10px] uppercase tracking-[.16em] text-[#d8e35b]">Progress & evaluation</div>
           <h3 className="mt-2 text-lg font-bold">Keep shipping</h3>
           {!isRegistered ? (
             <div className="mt-4 rounded-xl bg-[#252941] p-4 text-xs leading-5 text-[#9b9fb1]">
-              No progress to show yet — phase progress, mentor feedback and scores appear here after you register for a hackathon.
+              Feedback and scores will show up here once you register for a hackathon.
               <Link href="/participant/hackathons" className="mt-3 inline-flex items-center gap-1 font-bold text-[#d8e35b]">Discover hackathons <ArrowRight size={13}/></Link>
             </div>
           ) : (

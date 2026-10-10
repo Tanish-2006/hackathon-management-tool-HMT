@@ -9,13 +9,6 @@ function friendly(e: unknown) { return e instanceof ApiError ? e.message : (e as
 const YEARS = ['1st Year', '2nd Year', '3rd Year', '4th Year', 'Graduate', 'Other'];
 const E164 = /^\+[1-9]\d{7,14}$/;
 
-/**
- * Hackathon registration form, scoped to one published hackathon.
- * Prefills from the saved profile, saves missing details back through the
- * existing profile/skill endpoints, then creates the registration through
- * the existing register endpoint. On success it presents the team-choice
- * step (existing teams workspace, scoped by ?hackathon=).
- */
 export default function RegistrationForm({ hackathon, onRegistered }: { hackathon: any; onRegistered: (id: string) => void }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -74,7 +67,7 @@ export default function RegistrationForm({ hackathon, onRegistered }: { hackatho
     if (!form.institution.trim()) e.institution = 'Institution is required.';
     if (!form.city.trim()) e.city = 'Your city is required.';
     if (form.phone && !E164.test(form.phone.trim())) e.phone = 'Phone must be in international format.';
-    if (!form.languages.trim()) e.languages = 'Add at least one programming language for team matching.';
+    if (!form.languages.trim()) e.languages = 'Add at least one skill.';
     if (Array.isArray(hackathon?.eligibility) && hackathon.eligibility.length > 0 && !form.eligibility) {
       e.eligibility = 'Please confirm you meet the eligibility requirements.';
     }
@@ -88,7 +81,6 @@ export default function RegistrationForm({ hackathon, onRegistered }: { hackatho
     if (Object.keys(errs).length) return;
     setSaving(true); setError(null);
     try {
-      // 1. Persist participant information through existing endpoints.
       await hmtBackendService.updateProfile({
         fullName: form.fullName.trim(),
         institution: form.institution.trim(),
@@ -102,7 +94,6 @@ export default function RegistrationForm({ hackathon, onRegistered }: { hackatho
         programmingLanguages: form.languages.split(',').map((s) => s.trim()).filter(Boolean),
         experienceLevel: form.experience,
       });
-      // 2. Create the registration (backend re-validates phone/skills/eligibility).
       await hmtBackendService.registerForHackathon(hackathon.id, {
         teamChoice: 'later',
         ...(Array.isArray(hackathon?.eligibility) && hackathon.eligibility.length > 0 ? { eligibilityAccepted: true } : {}),
@@ -149,7 +140,7 @@ export default function RegistrationForm({ hackathon, onRegistered }: { hackatho
   return (
     <form onSubmit={submit} className="rounded-xl bg-[#f4f1e8] p-4" noValidate>
       <div className="flex items-center gap-2 text-xs font-bold"><ShieldCheck size={14} className="text-[#5aafbd]" /> Register for {hackathon?.title}</div>
-      <p className="mt-1 text-[11px] text-[#77798a]">Prefilled from your profile — complete what&apos;s missing. Saving here updates your profile too.</p>
+      <p className="mt-1 text-[11px] text-[#77798a]">Prefilled from your profile. Changes here update your profile too.</p>
       {error && <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">{error}</div>}
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -164,7 +155,7 @@ export default function RegistrationForm({ hackathon, onRegistered }: { hackatho
       </div>
       <label className="mt-3 block text-xs font-semibold">Bio (optional)<textarea value={form.bio} onChange={(e) => set('bio', e.target.value)} rows={2} maxLength={1000} className="mt-1 w-full resize-none rounded-xl border border-[#dedbd1] bg-white px-3 py-2 text-sm outline-none"/></label>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <label className="block text-xs font-semibold">Programming languages *<input value={form.languages} onChange={(e) => set('languages', e.target.value)} placeholder="TypeScript, Python" className="mt-1 w-full rounded-xl border border-[#dedbd1] bg-white px-3 py-2 text-sm outline-none"/>{err('languages')}</label>
+        <label className="block text-xs font-semibold">Skills *<input value={form.languages} onChange={(e) => set('languages', e.target.value)} placeholder="e.g. Design, Python, Marketing" className="mt-1 w-full rounded-xl border border-[#dedbd1] bg-white px-3 py-2 text-sm outline-none"/>{err('languages')}</label>
         <label className="block text-xs font-semibold">Experience<select value={form.experience} onChange={(e) => set('experience', e.target.value)} className="mt-1 w-full rounded-xl border border-[#dedbd1] bg-white px-3 py-2 text-sm"><option>BEGINNER</option><option>INTERMEDIATE</option><option>ADVANCED</option><option>EXPERT</option></select></label>
       </div>
       {needsEligibility && (

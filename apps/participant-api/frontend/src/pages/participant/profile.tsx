@@ -64,7 +64,6 @@ export default function ParticipantProfile(){
         yearOfStudy: form.yearOfStudy || undefined,
         bio: form.bio.trim() || undefined,
       });
-      // Discovery visibility lives on the skill profile (existing API).
       await hmtBackendService.upsertSkillProfile({ visibility: form.discoveryVisibility }).catch(()=>null);
       const me = await hmtBackendService.getMe().catch(()=>null);
       if(me) setUser((me as any)?.user || me);
@@ -81,7 +80,7 @@ export default function ParticipantProfile(){
         <div>
           <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Profile</div>
           <h1 className="mt-2 text-3xl font-bold tracking-[-.05em] text-[#171a2d]">Your details.</h1>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-[#77798a]">Basic information reused everywhere — including hackathon registration, so you never enter it twice.</p>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-[#77798a]">Your details are reused when you register for a hackathon.</p>
         </div>
         <span className="rounded-full bg-[#171a2d] px-3 py-1.5 text-xs font-bold text-white">{user?.role ?? '—'}</span>
       </div>
@@ -121,14 +120,14 @@ export default function ParticipantProfile(){
         <div className="space-y-6">
           <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6">
             <h3 className="font-bold flex items-center gap-2"><Eye size={16}/> Team discovery</h3>
-            <p className="mt-1 text-xs text-[#77798a]">Controls whether teammates can find you for matching. Your skill details stay in the backend for matching.</p>
-            <label className="mt-3 block text-xs font-semibold">Visibility<select value={form.discoveryVisibility} onChange={e=>set('discoveryVisibility',e.target.value)} className="mt-1 w-full rounded-xl border border-[#dedbd1] px-3 py-2 text-sm"><option value="TEAM_DISCOVERABLE">TEAM_DISCOVERABLE</option><option value="PRIVATE">PRIVATE</option><option value="PUBLIC_PROFILE">PUBLIC_PROFILE</option></select><span className="mt-1 block text-[11px] text-[#77798a]">Saved with your profile.</span></label>
+            <p className="mt-1 text-xs text-[#77798a]">Choose whether other participants can find you when forming teams.</p>
+            <label className="mt-3 block text-xs font-semibold">Visibility<select value={form.discoveryVisibility} onChange={e=>set('discoveryVisibility',e.target.value)} className="mt-1 w-full rounded-xl border border-[#dedbd1] px-3 py-2 text-sm"><option value="TEAM_DISCOVERABLE">Open to teams</option><option value="PRIVATE">Private</option><option value="PUBLIC_PROFILE">Public profile</option></select><span className="mt-1 block text-[11px] text-[#77798a]">Saved with your profile.</span></label>
           </div>
 
           <div className="rounded-2xl bg-[#171a2d] p-6 text-[#fdfbf5]">
             <div className="font-mono text-[10px] uppercase tracking-[.16em] text-[#d8e35b]">Privacy</div>
             <div className="mt-3 space-y-2 text-xs leading-5">
-              <div className="flex items-center gap-2"><ShieldCheck size={14} className="text-[#d8e35b]"/><span>Only you can edit your profile — the server enforces it.</span></div>
+              <div className="flex items-center gap-2"><ShieldCheck size={14} className="text-[#d8e35b]"/><span>Only you can edit your profile.</span></div>
               <div className="flex items-center gap-2"><MapPin size={14} className="text-[#9b9fb1]"/><span>Location fields are shared with team discovery only.</span></div>
             </div>
           </div>

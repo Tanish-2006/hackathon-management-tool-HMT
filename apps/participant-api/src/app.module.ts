@@ -18,8 +18,6 @@ import { GitHubModule } from './github/github.module';
 import { SyncModule } from './sync/sync.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { IdeationModule } from './ideation/ideation.module';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 
 /**
  * Root application module — organizes feature domains into isolated modules.
@@ -47,7 +45,5 @@ import { AppService } from './app.service';
     NotificationsModule,
     IdeationModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
 })
 export class AppModule {}

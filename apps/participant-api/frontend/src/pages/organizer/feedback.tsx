@@ -16,7 +16,6 @@ export default function OrganizerFeedback(){
   const [error,setError]=useState<string|null>(null);
   const [success,setSuccess]=useState<string|null>(null);
   const [versions,setVersions]=useState<Record<string,any[]>>({});
-  const [immutableMsg,setImmutableMsg]=useState<string|null>(null);
   const [initial,setInitial]=useState(true);
 
   useEffect(()=>{
@@ -32,21 +31,14 @@ export default function OrganizerFeedback(){
 
   const doReview=async(id:string)=>{
     setLoading(true); setError(null); setSuccess(null);
-    try{ const r=await organizerApi.reviewFeedback(id); setFeedbacks(prev=>prev.map(f=> f.id===id?r:f)); setSuccess(`Reviewed ${id.slice(0,8)} → ORGANIZER_REVIEWED`)}catch(e:any){ setError(e.message)} finally{ setLoading(false)}
+    try{ const r=await organizerApi.reviewFeedback(id); setFeedbacks(prev=>prev.map(f=> f.id===id?r:f)); setSuccess('Feedback reviewed.')}catch(e:any){ setError(e.message)} finally{ setLoading(false)}
   }
   const doPublish=async(id:string)=>{
     setLoading(true); setError(null);
-    try{ const r=await organizerApi.publishFeedback(id); setFeedbacks(prev=>prev.map(f=> f.id===id?r:f)); setSuccess(`Published ${id.slice(0,8)} → PUBLISHED (now visible to participants)`)}catch(e:any){ setError(e.message)} finally{ setLoading(false)}
+    try{ const r=await organizerApi.publishFeedback(id); setFeedbacks(prev=>prev.map(f=> f.id===id?r:f)); setSuccess('Feedback published. Participants can now see it.')}catch(e:any){ setError(e.message)} finally{ setLoading(false)}
   }
   const loadVersions=async(id:string)=>{
     try{ const vs=await organizerApi.listFeedbackVersions(id); setVersions(prev=>({...prev,[id]:vs}))}catch(e:any){ setError(e.message)}
-  }
-  const tryImmutable=async(id:string)=>{
-    setImmutableMsg(null); setError(null);
-    try{ await organizerApi.illegalUpdateFeedback(id,{remarks:'Hacked by organizer'}); setImmutableMsg('Unexpected success — immutability broken')}catch(e:any){
-      if(e instanceof OrganizerApiError && e.status===403) setImmutableMsg(`✓ Immutable: 403 ${e.message} — original preserved (PUT blocked)`)
-      else setImmutableMsg(`Error: ${e.message}`)
-    }
   }
 
   if(initial) return <div className="h-64 animate-pulse rounded-2xl bg-[#e9e5da]"/>
@@ -56,9 +48,8 @@ export default function OrganizerFeedback(){
       <div className="flex items-center gap-3">
         <Link href="/organizer/dashboard" className="rounded-xl border border-[#dedbd1] bg-[#fdfbf5] p-2"><ArrowLeft size={16}/></Link>
         <div>
-          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Organizer · feedback workflow</div>
-          <h1 className="text-2xl font-bold">Feedback</h1>
-          <p className="text-xs text-[#77798a]">MENTOR_SUBMITTED → ORGANIZER_REVIEWED → PUBLISHED · Immutable (PUT 403) · Versions · Audit</p>
+                    <h1 className="text-2xl font-bold">Feedback</h1>
+          <p className="text-xs text-[#77798a]">Review mentor feedback, then publish it to participants.</p>
         </div>
       </div>
 
@@ -69,10 +60,9 @@ export default function OrganizerFeedback(){
 
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 flex gap-2"><AlertCircle size={16}/>{error}<button onClick={()=>setError(null)} className="ml-auto text-xs font-bold">×</button></div>}
       {success && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 flex gap-2"><CheckCircle2 size={16}/>{success}<button onClick={()=>setSuccess(null)} className="ml-auto text-xs font-bold">×</button></div>}
-      {immutableMsg && <div className={`rounded-xl border p-3 text-sm flex gap-2 ${immutableMsg.includes('✓')?'border-emerald-200 bg-emerald-50 text-emerald-700':'border-amber-200 bg-amber-50 text-amber-700'}`}><Lock size={16}/>{immutableMsg}<button onClick={()=>setImmutableMsg(null)} className="ml-auto text-xs font-bold">×</button></div>}
 
       <div className="rounded-2xl bg-[#171a2d] p-5 text-[#fdfbf5] flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2 text-xs"><ShieldCheck size={16} className="text-[#d8e35b]"/><span className="font-bold">Workflow</span><span className="text-[#9b9fb1]">MENTOR_SUBMITTED → REVIEW → PUBLISH → visible to participant (score, remarks, reason, strengths, technical/product)</span></div>
+        <div className="flex items-center gap-2 text-xs"><ShieldCheck size={16} className="text-[#d8e35b]"/><span className="font-bold">Workflow</span><span className="text-[#9b9fb1]">Mentor submits → you review → you publish → participants see it.</span></div>
         <Link href="/organizer/evaluations" className="rounded-xl border border-[#2a2e45] px-3 py-2 text-xs font-semibold">Criteria</Link>
       </div>
 
@@ -82,8 +72,7 @@ export default function OrganizerFeedback(){
         <div className="rounded-2xl border border-dashed border-[#dedbd1] bg-[#fdfbf5] p-8 text-center">
           <div className="mx-auto grid h-10 w-10 place-items-center rounded-xl bg-[#f4f1e8]"><FileText size={18}/></div>
           <h3 className="mt-3 font-bold">No feedback yet</h3>
-          <p className="mx-auto mt-1 max-w-md text-sm text-[#77798a]">Mentor submits via MENTOR role: POST /mentor/feedback (score, remarks, reason, strengths, weaknesses, technicalFeedback, productFeedback, recommendation, phase). Then you review & publish here.</p>
-          <Link href="/mentor/feedback" className="mt-3 inline-flex rounded-xl bg-[#171a2d] px-3 py-2 text-xs font-bold text-white">Go to mentor feedback (submit)</Link>
+          <p className="mx-auto mt-1 max-w-md text-sm text-[#77798a]">Feedback from mentors will show up here for you to review and publish.</p>
         </div>
       ) : null}
 
@@ -95,13 +84,11 @@ export default function OrganizerFeedback(){
                 <div className="flex items-center gap-2"><span className="font-bold">Score {f.score}/10</span><StatusBadge s={f.publicationStatus}/><span className="font-mono text-[11px] text-[#77798a]">v{f.version} · {f.phase}</span></div>
                 <div className="mt-1 text-sm font-semibold">{f.remarks}</div>
                 <div className="text-xs text-[#77798a]">Reason: {f.reason}</div>
-                <div className="mt-1 text-xs">Mentor {f.mentorId?.slice(0,8)} · Team {f.teamId?.slice(0,8)} · Project {f.projectId?.slice(0,8) || '—'}</div>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button onClick={()=>doReview(f.id)} disabled={loading || f.publicationStatus!=='MENTOR_SUBMITTED'} className="rounded-xl bg-[#5aafbd] px-3 py-2 text-xs font-bold text-white disabled:opacity-40">Review</button>
                 <button onClick={()=>doPublish(f.id)} disabled={loading || f.publicationStatus!=='ORGANIZER_REVIEWED'} className="rounded-xl bg-[#d8e35b] px-3 py-2 text-xs font-bold text-[#171a2d] disabled:opacity-40">Publish</button>
                 <button onClick={()=>loadVersions(f.id)} className="rounded-xl border border-[#dedbd1] px-3 py-2 text-xs font-semibold">Versions</button>
-                <button onClick={()=>tryImmutable(f.id)} className="rounded-xl border border-[#dedbd1] px-3 py-2 text-xs font-semibold flex items-center gap-1"><Lock size={12}/> Try PUT (403)</button>
               </div>
             </div>
 
@@ -128,16 +115,10 @@ export default function OrganizerFeedback(){
                     </div>
                   ))}
                 </div>
-                <div className="mt-2 text-[11px] text-[#77798a]">Mentor correct via POST /mentor/feedback/:id/correct creates new version with parentId. Original preserved.</div>
               </div>
             )}
           </div>
         ))}
-      </div>
-
-      <div className="rounded-2xl border border-[#dedbd1] bg-[#f4f1e8] p-4 flex gap-3">
-        <ShieldCheck size={16} className="text-[#5aafbd] mt-0.5"/>
-        <p className="text-xs leading-5 text-[#77798a]"><b className="text-[#171a2d]">Immutability:</b> Original mentor record is immutable. Organizer cannot PUT-edit directly (403). Correction creates new version with audit log (actor, timestamp, originalId, newVersion). Unpublished feedback is invisible to participants (404 or filtered list).</p>
       </div>
     </div>
   )

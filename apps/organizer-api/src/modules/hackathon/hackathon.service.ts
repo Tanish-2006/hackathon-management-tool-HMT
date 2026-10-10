@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import type { Hackathon, HackathonDraft, HackathonDraftInput, HackathonStatus, HackathonPublishedEvent, HackathonPhase, RegenerableSection, SectionProvenance, WizardInput } from '../../domain/types';
-import { memoryStore } from '../../store/memory.store';
-import { MockAIDraftGenerator, DraftGeneratorFactory } from './draft-generator';
+import { HACKATHON_TRANSITIONS, memoryStore } from '../../store/memory.store';
+import { MockAIDraftGenerator } from './draft-generator';
 import { buildWizardSections, deriveWorkingTitle, eligibilityToAudience, rebuildSection, splitDurationPlus, toBaseDraft } from './wizard-generator';
 import { wizardDraftSchema } from './hackathon.schemas';
 import { auditService } from '../audit/audit.service';
@@ -86,56 +86,45 @@ function validateParticipationConfig(cfg: Record<string, unknown>): string | nul
 }
 
 export class HackathonService {
-  private draftGenerator = DraftGeneratorFactory.create('mock');
-  private customGeneratorSet = false;
-  // Allow injecting custom generator for provider-agnostic testing
-  setDraftGenerator(generator: any) {
-    this.draftGenerator = generator;
-    this.customGeneratorSet = true;
-  }
+  private readonly draftGenerator = new MockAIDraftGenerator({ provider: 'mock-ai' });
 
   // Create draft from organizer workflow input via AI Gateway (provider-independent)
   async generateDraft(input: HackathonDraftInput, organizerId: string, opts?: { ip?: string; requestId?: string }): Promise<{ hackathon: Hackathon; draft: HackathonDraft }> {
     let draft: HackathonDraft;
-    // If test injected a custom generator, use it directly to preserve existing tests
-    if (this.customGeneratorSet) {
+    // Use AI Gateway when available — respects AI_PROVIDER=mock|external, never publishes
+    try {
+      const env = this.safeLoadEnvForAI();
+      const aiService = new AIService({
+        provider: (env?.AI_API_KEY ? env.AI_PROVIDER : 'mock') as 'mock' | 'external',
+        apiKey: env?.AI_API_KEY ?? '',
+        model: env?.AI_MODEL ?? '',
+        baseUrl: env?.AI_BASE_URL ?? '',
+        timeoutMs: env?.AI_TIMEOUT_MS ?? 15000,
+        maxRetries: env?.AI_MAX_RETRIES ?? 1,
+      });
+      const gateway = new AIGateway(aiService);
+      const result = await gateway.generateOrganizerDraft(
+        {
+          hackathonName: input.hackathonName,
+          objective: input.objective,
+          audience: input.audience,
+          duration: input.duration,
+          mode: input.mode,
+          themePreference: input.themePreference,
+          problemStatementBasedOrOpenInnovation: input.problemStatementBasedOrOpenInnovation,
+          expectedOutcomes: input.expectedOutcomes,
+          judgingPreferences: input.judgingPreferences,
+          resources: input.resources,
+          rules: input.rules,
+        },
+        { requestId: opts?.requestId, userId: organizerId },
+      );
+      draft = result.draftJson as HackathonDraft;
+      if (!draft.title) throw new Error('AI draft missing title');
+    } catch (e) {
+      // Fallback to local mock for tests or if gateway fails in mock mode
+      if (process.env.AI_PROVIDER === 'external' && process.env.NODE_ENV === 'production') throw e;
       draft = await this.draftGenerator.generateDraft(input);
-    } else {
-      // Use AI Gateway when available — respects AI_PROVIDER=mock|external, never publishes
-      try {
-        const env = this.safeLoadEnvForAI();
-        const aiService = new AIService({
-          provider: (env?.AI_API_KEY ? env.AI_PROVIDER : 'mock') as 'mock' | 'external',
-          apiKey: env?.AI_API_KEY ?? '',
-          model: env?.AI_MODEL ?? '',
-          baseUrl: env?.AI_BASE_URL ?? '',
-          timeoutMs: env?.AI_TIMEOUT_MS ?? 15000,
-          maxRetries: env?.AI_MAX_RETRIES ?? 1,
-        });
-        const gateway = new AIGateway(aiService);
-        const result = await gateway.generateOrganizerDraft(
-          {
-            hackathonName: input.hackathonName,
-            objective: input.objective,
-            audience: input.audience,
-            duration: input.duration,
-            mode: input.mode,
-            themePreference: input.themePreference,
-            problemStatementBasedOrOpenInnovation: input.problemStatementBasedOrOpenInnovation,
-            expectedOutcomes: input.expectedOutcomes,
-            judgingPreferences: input.judgingPreferences,
-            resources: input.resources,
-            rules: input.rules,
-          },
-          { requestId: opts?.requestId, userId: organizerId },
-        );
-        draft = result.draftJson as HackathonDraft;
-        if (!draft.title) throw new Error('AI draft missing title');
-      } catch (e) {
-        // Fallback to local mock for tests or if gateway fails in mock mode
-        if (process.env.AI_PROVIDER === 'external' && process.env.NODE_ENV === 'production') throw e;
-        draft = await this.draftGenerator.generateDraft(input);
-      }
     }
 
     const id = randomUUID();
@@ -168,7 +157,7 @@ export class HackathonService {
       archivedAt: null,
       metadata: {
         draftGeneratedAt: draft.generatedAt,
-        draftGenerator: (this.draftGenerator as any).getProviderName?.() ?? 'mock-ai',
+        draftGenerator: this.draftGenerator.getProviderName(),
         draft: draft,
       },
     };
@@ -258,8 +247,40 @@ export class HackathonService {
 
     let base: HackathonDraft;
     let provider = 'wizard-v1';
-    if (this.customGeneratorSet) {
-      base = await this.draftGenerator.generateDraft({
+    try {
+      const env = this.safeLoadEnvForAI();
+      const aiService = new AIService({
+        provider: (env?.AI_API_KEY ? env.AI_PROVIDER : 'mock') as 'mock' | 'external',
+        apiKey: env?.AI_API_KEY ?? '',
+        model: env?.AI_MODEL ?? '',
+        baseUrl: env?.AI_BASE_URL ?? '',
+        timeoutMs: env?.AI_TIMEOUT_MS ?? 15000,
+        maxRetries: env?.AI_MAX_RETRIES ?? 1,
+      });
+      const gateway = new AIGateway(aiService);
+      const result = await gateway.generateOrganizerDraft(
+        {
+          hackathonName: workingTitle,
+          objective: about,
+          audience,
+          duration,
+          mode: wizard.mode,
+          themePreference: about.split(' ').slice(0, 3).join(' ') || 'Open Innovation',
+          problemStatementBasedOrOpenInnovation: wizard.hackathonType,
+          expectedOutcomes: 'Functional prototype, Demo video',
+          judgingPreferences: 'Innovation, Technical implementation, Impact',
+          resources: 'Starter Kit',
+          rules: requirements || 'Original work only',
+        },
+        { requestId: opts?.requestId, userId: organizerId },
+      );
+      base = result.draftJson as HackathonDraft;
+      provider = `${result.provider}:${result.model}`;
+      if (!base.title) throw new Error('AI draft missing title');
+    } catch (e) {
+      if (process.env.AI_PROVIDER === 'external' && process.env.NODE_ENV === 'production') throw e;
+      const fallback = new MockAIDraftGenerator({ provider: 'wizard-fallback' });
+      base = await fallback.generateDraft({
         hackathonName: workingTitle,
         objective: about,
         audience,
@@ -272,56 +293,7 @@ export class HackathonService {
         resources: 'Starter Kit',
         rules: requirements || 'Original work only',
       });
-      provider = (this.draftGenerator as any).getProviderName?.() ?? 'mock-ai';
-    } else {
-      try {
-        const env = this.safeLoadEnvForAI();
-        const aiService = new AIService({
-          provider: (env?.AI_API_KEY ? env.AI_PROVIDER : 'mock') as 'mock' | 'external',
-          apiKey: env?.AI_API_KEY ?? '',
-          model: env?.AI_MODEL ?? '',
-          baseUrl: env?.AI_BASE_URL ?? '',
-          timeoutMs: env?.AI_TIMEOUT_MS ?? 15000,
-          maxRetries: env?.AI_MAX_RETRIES ?? 1,
-        });
-        const gateway = new AIGateway(aiService);
-        const result = await gateway.generateOrganizerDraft(
-          {
-            hackathonName: workingTitle,
-            objective: about,
-            audience,
-            duration,
-            mode: wizard.mode,
-            themePreference: about.split(' ').slice(0, 3).join(' ') || 'Open Innovation',
-            problemStatementBasedOrOpenInnovation: wizard.hackathonType,
-            expectedOutcomes: 'Functional prototype, Demo video',
-            judgingPreferences: 'Innovation, Technical implementation, Impact',
-            resources: 'Starter Kit',
-            rules: requirements || 'Original work only',
-          },
-          { requestId: opts?.requestId, userId: organizerId },
-        );
-        base = result.draftJson as HackathonDraft;
-        provider = `${result.provider}:${result.model}`;
-        if (!base.title) throw new Error('AI draft missing title');
-      } catch (e) {
-        if (process.env.AI_PROVIDER === 'external' && process.env.NODE_ENV === 'production') throw e;
-        const fallback = new MockAIDraftGenerator({ provider: 'wizard-fallback' });
-        base = await fallback.generateDraft({
-          hackathonName: workingTitle,
-          objective: about,
-          audience,
-          duration,
-          mode: wizard.mode,
-          themePreference: about.split(' ').slice(0, 3).join(' ') || 'Open Innovation',
-          problemStatementBasedOrOpenInnovation: wizard.hackathonType,
-          expectedOutcomes: 'Functional prototype, Demo video',
-          judgingPreferences: 'Innovation, Technical implementation, Impact',
-          resources: 'Starter Kit',
-          rules: requirements || 'Original work only',
-        });
-        provider = 'wizard-fallback';
-      }
+      provider = 'wizard-fallback';
     }
 
     // Extended wizard sections (deterministic, mode-aware, no fabricated facts).
@@ -1017,17 +989,8 @@ export class HackathonService {
     return event;
   }
 
-  private allowedTransitions(from: HackathonStatus): HackathonStatus[] {
-    // Archive is terminal and reachable ONLY from PUBLISHED. Non-published
-    // states can never archive directly (prevents accidental archival).
-    const map: Record<HackathonStatus, HackathonStatus[]> = {
-      DRAFT: ['REVIEW'],
-      REVIEW: ['DRAFT', 'CONFIRMED'],
-      CONFIRMED: ['PUBLISHED', 'REVIEW'],
-      PUBLISHED: ['ARCHIVED'],
-      ARCHIVED: [],
-    };
-    return map[from] ?? [];
+  private allowedTransitions(from: HackathonStatus): readonly HackathonStatus[] {
+    return HACKATHON_TRANSITIONS[from] ?? [];
   }
 
   private async validateForConfirm(hackathon: Hackathon): Promise<{ valid: boolean; error?: string }> {

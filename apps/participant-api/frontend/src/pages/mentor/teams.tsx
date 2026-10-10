@@ -22,7 +22,7 @@ export default function MentorTeams(){
         if(!m) return; setTeams(list);
       }catch(e:any){
         if(!m) return;
-        if(e instanceof OrganizerApiError && e.status===403) setError('You can only view your own assigned teams. Sign in as the correct mentor.');
+        if(e instanceof OrganizerApiError && e.status===403) setError('You can only see teams assigned to you.');
         else setError(e.message)
       } finally{ if(m) setLoading(false)}
     }
@@ -39,9 +39,9 @@ export default function MentorTeams(){
       <div className="flex items-center gap-3">
         <Link href="/mentor/dashboard" className="rounded-xl border border-[#dedbd1] bg-[#fdfbf5] p-2"><ArrowLeft size={16}/></Link>
         <div>
-          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Mentor · teams</div>
+          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Teams</div>
           <h1 className="text-2xl font-bold">Teams</h1>
-          <p className="text-xs text-[#77798a]">GET /mentors/:mentorId/teams — same as dashboard, permission-aware (own assignments only).</p>
+          <p className="text-xs text-[#77798a]">Teams you've been assigned to mentor.</p>
         </div>
       </div>
 
@@ -54,20 +54,19 @@ export default function MentorTeams(){
         <div className="rounded-2xl border border-dashed border-[#dedbd1] bg-[#fdfbf5] p-10 text-center">
           <div className="mx-auto grid h-10 w-10 place-items-center rounded-xl bg-[#f4f1e8]"><Layers size={18}/></div>
           <h3 className="mt-3 font-bold">No assigned teams</h3>
-          <p className="mt-1 text-sm text-[#77798a]">You will see teams here after an organizer assigns you (POST /hackathons/:id/mentor-assignments).</p>
+          <p className="mt-1 text-sm text-[#77798a]">Teams appear here once an organizer assigns you.</p>
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {filtered.map((t:any)=>(
             <div key={t.id} className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-5 hover:-translate-y-1 transition-transform">
               <div className="flex items-center justify-between">
-                <span className="font-bold">{t.name || t.id.slice(0,12)}</span>
+                <span className="font-bold">{t.name || 'Unnamed team'}</span>
                 <span className="rounded-full bg-[#f4f1e8] px-2 py-1 text-[10px] font-bold flex items-center gap-1"><Users size={12}/>{t.memberCount ?? t.members?.length ?? 0}</span>
               </div>
-              <div className="mt-2 text-xs text-[#77798a]">Hackathon {t.hackathonId?.slice(0,8)} · Team {t.id.slice(0,12)}</div>
               <div className="mt-3 flex flex-wrap gap-1.5">
-                {(t.members||[]).slice(0,4).map((m:any,i:number)=> <span key={i} className="rounded-full bg-[#e9e5da] px-2 py-1 text-[11px] font-semibold">{m.displayName || m.userId?.slice(0,6)}</span>)}
-                {(t.members?.length||0)===0 && <span className="text-xs text-[#77798a]">Members hidden until assignment confirmed</span>}
+                {(t.members||[]).slice(0,4).map((m:any,i:number)=> <span key={i} className="rounded-full bg-[#e9e5da] px-2 py-1 text-[11px] font-semibold">{m.displayName || 'Member'}</span>)}
+                {(t.members?.length||0)===0 && <span className="text-xs text-[#77798a]">Members not listed</span>}
               </div>
               <div className="mt-3 rounded-xl bg-white border border-[#e5e1d7] p-3">
                 <div className="text-xs font-bold">Project</div>

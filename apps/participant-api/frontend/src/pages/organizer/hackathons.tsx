@@ -26,7 +26,7 @@ export default function OrganizerHackathons(){
         if(!m) return; setList(data);
       }catch(e:any){
         if(!m) return;
-        if(e instanceof OrganizerApiError && e.status===403) setError('Organizer role required to list hackathons. Sign in as ORGANIZER or ADMIN.');
+        if(e instanceof OrganizerApiError && e.status===403) setError('Sign in with an organizer account to see your hackathons.');
         else setError(e.message || 'Failed to load hackathons');
       } finally{ if(m) setLoading(false)}
     }
@@ -48,12 +48,10 @@ export default function OrganizerHackathons(){
     <div className="space-y-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Organizer · hackathons</div>
-          <h1 className="mt-2 text-3xl font-bold tracking-[-.05em] text-[#171a2d]">Hackathons.</h1>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-[#77798a]">Role-filtered list from GET /hackathons. Organizer sees owned hackathons, ADMIN sees all, MENTOR/PARTICIPANT sees only published — permission-aware.</p>
+                    <h1 className="mt-2 text-3xl font-bold tracking-[-.05em] text-[#171a2d]">Hackathons.</h1>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link href="/organizer/hackathons/quick-create" className="inline-flex items-center gap-2 rounded-xl bg-[#f26a4f] px-4 py-3 text-sm font-bold text-white hover:bg-[#d95341]" data-testid="link-quick-create"><Sparkles size={16}/> Quick AI create <ArrowRight size={14}/></Link>
+          <Link href="/organizer/hackathons/quick-create" className="inline-flex items-center gap-2 rounded-xl bg-[#f26a4f] px-4 py-3 text-sm font-bold text-white hover:bg-[#d95341]" data-testid="link-quick-create"><Sparkles size={16}/> Create with AI <ArrowRight size={14}/></Link>
           <Link href="/organizer/hackathons/create" className="inline-flex items-center gap-2 rounded-xl bg-[#171a2d] px-4 py-3 text-sm font-bold text-white hover:bg-[#252941]"> Create hackathon <ArrowRight size={14}/></Link>
         </div>
       </div>
@@ -66,9 +64,9 @@ export default function OrganizerHackathons(){
       {filtered.length===0 ? (
         <div className="rounded-2xl border border-dashed border-[#dedbd1] p-10 text-center bg-[#fdfbf5]">
           <div className="mx-auto grid h-10 w-10 place-items-center rounded-xl bg-[#f4f1e8]"><Layers size={18}/></div>
-          <h3 className="mt-3 font-bold">No hackathons match filter</h3>
-          <p className="mx-auto mt-1 max-w-md text-sm text-[#77798a]">Try adjusting search or create a new hackathon. AI-generated drafts stay DRAFT — never auto-publish.</p>
-          <Link href="/organizer/hackathons/create" className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#f26a4f] px-4 py-2 text-xs font-bold text-white">Start wizard</Link>
+          <h3 className="mt-3 font-bold">No hackathons found</h3>
+          <p className="mx-auto mt-1 max-w-md text-sm text-[#77798a]">Try a different search, or create a new hackathon.</p>
+          <Link href="/organizer/hackathons/create" className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#f26a4f] px-4 py-2 text-xs font-bold text-white">Create hackathon</Link>
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -76,31 +74,18 @@ export default function OrganizerHackathons(){
             <motion.div key={h.id} initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} transition={{delay:i*0.04}} className="group relative flex flex-col rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-5 hover:-translate-y-1 hover:border-[#f26a4f]/60 transition-all">
               <div className="flex items-center justify-between">
                 <Badge tone={h.status==='PUBLISHED'?'lime':h.status==='DRAFT'?'muted':h.status==='REVIEW'?'blue':h.status==='CONFIRMED'?'coral':'dark'}>{h.status}</Badge>
-                <span className="font-mono text-[10px] text-[#aaa9a2]">{h.hackathonType || '—'}</span>
+                <span className="font-mono text-[10px] text-[#aaa9a2]">{h.hackathonType==='OPEN_INNOVATION' ? 'Open innovation' : h.hackathonType ? 'Problem statement' : ''}</span>
               </div>
               <h3 className="mt-5 text-lg font-bold tracking-tight line-clamp-1">{h.title}</h3>
               <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#77798a]">{h.description || 'No description'}</p>
               <div className="mt-4 flex items-center gap-3 text-xs text-[#77798a]"><Calendar size={12}/>{h.duration || '—'} · {h.mode || 'HYBRID'}</div>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {(h.themeIds||[]).slice(0,2).map((t:string)=><span key={t} className="rounded-full bg-[#f4f1e8] px-2 py-1 text-[10px] font-semibold">{t.slice(0,8)}</span>)}
-                {(h.themeIds?.length||0)>2 && <span className="text-[10px] text-[#77798a]">+{h.themeIds.length-2}</span>}
-              </div>
               <div className="mt-4 flex items-center gap-2 border-t border-[#e5e1d7] pt-4">
                 <Link href={`/organizer/hackathons/${h.id}`} className="flex-1 rounded-xl bg-[#171a2d] px-3 py-2 text-center text-xs font-bold text-white group-hover:bg-[#252941]">Open workspace <ArrowRight size={12} className="ml-1 inline"/></Link>
-                <span className="font-mono text-[10px] text-[#77798a]">v{h.version}</span>
               </div>
             </motion.div>
           ))}
         </div>
       )}
-
-      <div className="rounded-2xl bg-[#171a2d] p-6 text-[#fdfbf5] flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="font-mono text-[10px] uppercase tracking-[.16em] text-[#d8e35b]">Guardrail</div>
-          <p className="mt-1 text-sm">AI-generated content <b className="text-[#d8e35b]">never automatically publishes</b>. Every draft requires your explicit REVIEW → CONFIRMED → PUBLISHED.</p>
-        </div>
-        <ShieldCheck size={28} className="text-[#d8e35b] shrink-0"/>
-      </div>
     </div>
   )
 }

@@ -13,7 +13,6 @@ export default function OrganizerAudit(){
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState<string|null>(null);
   const [selectedLog,setSelectedLog]=useState<any|null>(null);
-  const [appendOnlyMsg,setAppendOnlyMsg]=useState<string|null>(null);
 
   const load=async()=>{
     setLoading(true); setError(null);
@@ -22,7 +21,7 @@ export default function OrganizerAudit(){
       setLogs(list);
       setFiltered(list);
     }catch(e:any){
-      if(e instanceof OrganizerApiError && e.status===403) setError('Only ORGANIZER/ADMIN can view audit logs.');
+      if(e instanceof OrganizerApiError && e.status===403) setError('Only organizers can view the activity log.');
       else setError(e.message)
     } finally{ setLoading(false)}
   }
@@ -35,19 +34,6 @@ export default function OrganizerAudit(){
     setFiltered(lst);
   },[logs,q,filterAction]);
 
-  const tryAppendOnly = async(type:'put'|'delete')=>{
-    if(!selectedLog){ setAppendOnlyMsg('Select a log first'); return }
-    setAppendOnlyMsg(null);
-    try{
-      if(type==='put') await organizerApi.tryUpdateAuditLog(selectedLog.id);
-      else await organizerApi.tryDeleteAuditLog(selectedLog.id);
-      setAppendOnlyMsg('Unexpected success — append-only violated');
-    }catch(e:any){
-      if(e instanceof OrganizerApiError && e.status===403) setAppendOnlyMsg(`✓ Append-only ✓ 403 ${e.message}`)
-      else setAppendOnlyMsg(e.message)
-    }
-  }
-
   const actions = Array.from(new Set(logs.map(l=>l.action))).slice(0,12);
 
   return (
@@ -55,9 +41,8 @@ export default function OrganizerAudit(){
       <div className="flex items-center gap-3">
         <Link href="/organizer/dashboard" className="rounded-xl border border-[#dedbd1] bg-[#fdfbf5] p-2"><ArrowLeft size={16}/></Link>
         <div>
-          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Organizer · audit</div>
-          <h1 className="text-2xl font-bold">Audit logs</h1>
-          <p className="text-xs text-[#77798a]">GET /audit/logs, GET /audit/logs/:id — append-only (PUT/DELETE → 403).</p>
+                    <h1 className="text-2xl font-bold">Activity log</h1>
+          <p className="text-xs text-[#77798a]">A record of every important change.</p>
         </div>
       </div>
 
@@ -67,12 +52,11 @@ export default function OrganizerAudit(){
         <button onClick={load} className="rounded-xl border border-[#dedbd1] bg-[#fdfbf5] px-4 py-2 text-xs font-bold">Refresh</button>
       </div>
 
-      {appendOnlyMsg && <div className={`rounded-xl border p-3 text-sm flex gap-2 ${appendOnlyMsg.includes('✓')?'border-emerald-200 bg-emerald-50 text-emerald-700':'border-amber-200 bg-amber-50 text-amber-700'}`}><Lock size={16}/>{appendOnlyMsg}<button onClick={()=>setAppendOnlyMsg(null)} className="ml-auto text-xs font-bold">×</button></div>}
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 flex gap-2"><AlertCircle size={16}/>{error}</div>}
-      {loading && <div className="flex items-center gap-2 text-sm text-[#77798a]"><Loader2 size={16} className="animate-spin"/> Loading audit logs…</div>}
+      {loading && <div className="flex items-center gap-2 text-sm text-[#77798a]"><Loader2 size={16} className="animate-spin"/> Loading activity…</div>}
 
       {!loading && !error && filtered.length===0 ? (
-        <div className="rounded-2xl border border-dashed border-[#dedbd1] bg-[#fdfbf5] p-8 text-center text-sm text-[#77798a]">No audit logs yet. Actions like hackathon.draft_generated, hackathon.review, mentor.feedback_submitted will appear here.</div>
+        <div className="rounded-2xl border border-dashed border-[#dedbd1] bg-[#fdfbf5] p-8 text-center text-sm text-[#77798a]">No activity yet.</div>
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[1.7fr_.8fr]">
@@ -93,7 +77,7 @@ export default function OrganizerAudit(){
               </tbody>
             </table>
           </div>
-          <div className="border-t border-[#e5e1d7] bg-[#f4f1e8] px-4 py-3 flex items-center gap-2 text-xs text-[#77798a]"><ShieldCheck size={14} className="text-[#5aafbd]"/>{filtered.length} logs · append-only · every important action is recorded with actor, timestamp, requestId.</div>
+          <div className="border-t border-[#e5e1d7] bg-[#f4f1e8] px-4 py-3 flex items-center gap-2 text-xs text-[#77798a]"><ShieldCheck size={14} className="text-[#5aafbd]"/>{filtered.length} entries</div>
         </div>
 
         <div className="space-y-4">
@@ -110,19 +94,8 @@ export default function OrganizerAudit(){
                 </div>
                 {selectedLog.metadata && <div className="rounded-xl bg-[#171a2d] p-3 text-[#fdfbf5]"><div className="font-mono text-[10px] uppercase tracking-wider text-[#d8e35b]">Metadata</div><pre className="mt-2 text-[11px] whitespace-pre-wrap break-words">{JSON.stringify(selectedLog.metadata, null, 2)}</pre></div>}
 
-                <div className="flex gap-2">
-                  <button onClick={()=>tryAppendOnly('put')} className="flex-1 rounded-xl border border-[#dedbd1] px-3 py-2 text-xs font-semibold flex items-center justify-center gap-1"><Lock size={12}/> Try PUT (403)</button>
-                  <button onClick={()=>tryAppendOnly('delete')} className="flex-1 rounded-xl border border-[#dedbd1] px-3 py-2 text-xs font-semibold flex items-center justify-center gap-1"><Lock size={12}/> Try DELETE (403)</button>
-                </div>
-                <div className="text-[11px] text-[#77798a]">PUT /audit/logs/:id and DELETE are blocked — audit is append-only.</div>
               </div>
-            ) : <div className="mt-3 rounded-xl bg-[#f4f1e8] p-4 text-xs text-[#77798a]">Select a log row to view detail. You can also GET /audit/logs/:id directly.</div>}
-          </div>
-
-          <div className="rounded-2xl bg-[#171a2d] p-5 text-[#fdfbf5]">
-            <div className="font-mono text-[10px] uppercase tracking-[.16em] text-[#d8e35b]">Coverage</div>
-            <p className="mt-2 text-xs leading-5 text-[#b9bdca]">Important actions: creation, draft_generated, edited, review, confirmed, published, mentor.assigned, evaluation, feedback_submitted/reviewed/published, phase.created, feedback_corrected etc.</p>
-            <Link href="/organizer/analytics" className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-[#d8e35b]">Analytics <ChevronRight size={14}/></Link>
+            ) : <div className="mt-3 rounded-xl bg-[#f4f1e8] p-4 text-xs text-[#77798a]">Select an entry to see details.</div>}
           </div>
         </div>
       </div>

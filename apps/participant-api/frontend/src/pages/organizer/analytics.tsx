@@ -26,7 +26,7 @@ export default function OrganizerAnalytics(){
     if(!selected) return;
     setLoading(true); setError(null);
     organizerApi.getAnalytics(selected).then(setData).catch((e:any)=>{
-      if(e instanceof OrganizerApiError && e.status===403) setError('Only ORGANIZER/ADMIN can view analytics for this hackathon.');
+      if(e instanceof OrganizerApiError && e.status===403) setError('Only the organizer who owns this hackathon can see its analytics.');
       else setError(e.message);
       setData(null);
     }).finally(()=> setLoading(false))
@@ -52,9 +52,7 @@ export default function OrganizerAnalytics(){
       <div className="flex items-center gap-3">
         <Link href="/organizer/dashboard" className="rounded-xl border border-[#dedbd1] bg-[#fdfbf5] p-2"><ArrowLeft size={16}/></Link>
         <div>
-          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Organizer · analytics</div>
-          <h1 className="text-2xl font-bold">Analytics</h1>
-          <p className="text-xs text-[#77798a]">GET /hackathons/:id/analytics — participant/team/evaluation/phase statistics with recharts.</p>
+                    <h1 className="text-2xl font-bold">Analytics</h1>
         </div>
       </div>
 
@@ -159,13 +157,8 @@ export default function OrganizerAnalytics(){
               </Card>
             </div>
           </div>
-
-          <div className="rounded-2xl bg-[#171a2d] p-6 text-[#fdfbf5] flex items-center gap-3">
-            <BarChart3 size={20} className="text-[#d8e35b]"/>
-            <p className="text-sm">Derived from real in-memory store — participantCount, teamCount, phaseProgress, submissionRate, evaluationStatus, feedbackCompletion are not mocked.</p>
-          </div>
         </>
-      ) : !loading && !error ? <div className="rounded-2xl border border-dashed border-[#dedbd1] bg-[#fdfbf5] p-8 text-center text-sm text-[#77798a]">Select a hackathon to view analytics. Data is live from organizer API.</div> : null}
+      ) : !loading && !error ? <div className="rounded-2xl border border-dashed border-[#dedbd1] bg-[#fdfbf5] p-8 text-center text-sm text-[#77798a]">Select a hackathon to see its analytics.</div> : null}
     </div>
   )
 }

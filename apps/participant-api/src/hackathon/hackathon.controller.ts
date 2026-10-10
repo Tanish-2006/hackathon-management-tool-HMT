@@ -136,17 +136,18 @@ export class HackathonController {
   @Get('current')
   async getCurrentHackathon() {
     // The "current" hackathon is an active PUBLISHED one — never ARCHIVED.
-    const hackathon = await this.prisma.hackathon.findFirst({
+    const stored = await this.prisma.hackathon.findFirst({
       where: { isPublished: true },
       orderBy: { createdAt: 'desc' },
       include: { announcements: true },
     } as any);
 
-    if (!hackathon || (hackathon.status ?? 'PUBLISHED') === 'ARCHIVED') {
+    if (!stored || (stored.status ?? 'PUBLISHED') === 'ARCHIVED') {
       // Honest empty — never auto-seed hardcoded mocks (real API is authoritative).
       return null;
     }
 
+    const hackathon = { ...stored };
     // Ensure we never expose organizer-only announcements
     if (hackathon.announcements) {
       hackathon.announcements = hackathon.announcements.filter(

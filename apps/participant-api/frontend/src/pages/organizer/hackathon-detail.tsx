@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useLocation } from 'wouter';
 import { AlertCircle, ArrowLeft, Calendar, CheckCircle2, Clock3, ExternalLink, FileText, Layers, Loader2, ShieldCheck, Sparkles, Users, Star, ChevronRight, Trash2, Edit2 } from 'lucide-react';
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { organizerApi, OrganizerApiError } from '@/services/organizerApi';
 import IdeationPanel from '@/pages/organizer/ideation-panel';
 
@@ -26,7 +25,6 @@ export default function OrganizerHackathonDetail(){
   const [actionErr,setActionErr]=useState<string|null>(null);
   const [busy,setBusy]=useState(false);
   const [view,setView]=useState<'overview'|'ideation'>('overview');
-  // Archive danger zone: modal visibility + mandatory acknowledgement checkbox.
   const [showArchive, setShowArchive] = useState(false);
   const [archiveChecked, setArchiveChecked] = useState(false);
   const [archiving, setArchiving] = useState(false);
@@ -48,18 +46,16 @@ export default function OrganizerHackathonDetail(){
       if(cr.status==='fulfilled') setCriteria(cr.value as any);
       if(ms.status==='fulfilled') setAssignments(ms.value as any);
       if(an.status==='fulfilled') setAnalytics(an.value as any);
-      // participants/teams best effort (needs ownership)
       organizerApi.listParticipants(id).then(setParticipants).catch(()=>setParticipants([]));
       organizerApi.listTeams(id).then(setTeams).catch(()=>setTeams([]));
     }catch(e:any){
-      if(e instanceof OrganizerApiError && e.status===403) setError('Not owner — only the organizing owner or ADMIN can view this DRAFT/REVIEW/CONFIRMED workspace.');
+      if(e instanceof OrganizerApiError && e.status===403) setError('Only the organizer who owns this hackathon can view it.');
       else setError(e.message || 'Failed to load hackathon')
     } finally{ setLoading(false)}
   };
   useEffect(()=>{ if(id) load(); },[id]);
 
   async function doArchive(){
-    // Confirm button is disabled until the checkbox is checked; double-guard here.
     if (!archiveChecked || archiving) return;
     setArchiving(true); setActionMsg(null); setActionErr(null);
     try{
@@ -91,7 +87,6 @@ export default function OrganizerHackathonDetail(){
   if(error) return <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-700 flex gap-3"><AlertCircle size={18}/><div><b>Could not load hackathon</b><p className="mt-1">{error}</p><button onClick={load} className="mt-3 rounded-lg bg-[#171a2d] px-3 py-1.5 text-xs font-bold text-white">Retry</button></div></div>
   if(!hackathon) return <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-8 text-center text-sm text-[#77798a]">Hackathon not found</div>
 
-  const chartData = phases.map((p:any)=> ({ name: p.name.slice(0,6), order: p.order }));
   const publishReady = hackathon.status==='CONFIRMED';
   const canEdit = ['DRAFT','REVIEW'].includes(hackathon.status);
 
@@ -100,7 +95,7 @@ export default function OrganizerHackathonDetail(){
       <div className="flex items-center gap-3">
         <Link href="/organizer/hackathons" className="rounded-xl border border-[#dedbd1] bg-[#fdfbf5] p-2"><ArrowLeft size={16}/></Link>
         <div className="min-w-0">
-          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Organizer · workspace · {hackathon.status}</div>
+          <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Hackathon</div>
           <h1 className="text-2xl font-bold tracking-[-.04em] truncate">{hackathon.title}</h1>
           <p className="text-xs text-[#77798a] line-clamp-1">{hackathon.description}</p>
         </div>
@@ -117,26 +112,24 @@ export default function OrganizerHackathonDetail(){
       </div>
 
       {view==='overview' ? (<>
-      {/* Publish controls */}
       <Card className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2 text-xs">
-          <ShieldCheck size={16} className="text-[#5aafbd]"/><span className="font-bold">Publish controls</span><span className="text-[#77798a]">DRAFT→REVIEW→CONFIRMED→PUBLISHED</span>
+          <ShieldCheck size={16} className="text-[#5aafbd]"/><span className="font-bold">Publishing</span><span className="text-[#77798a]">Review, confirm, then publish.</span>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button onClick={()=>doTransition('review')} disabled={busy || hackathon.status!=='DRAFT'} className="rounded-xl bg-[#5aafbd] px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{busy?'…':'→ REVIEW'}</button>
-          <button onClick={()=>doTransition('confirm')} disabled={busy || hackathon.status!=='REVIEW'} className="rounded-xl bg-[#f26a4f] px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{busy?'…':'→ CONFIRMED'}</button>
-          <button onClick={()=>doTransition('publish')} disabled={busy || !publishReady} className="rounded-xl bg-[#d8e35b] px-3 py-2 text-xs font-bold text-[#171a2d] disabled:opacity-40">{busy?'…':'→ PUBLISHED'}</button>
+          <button onClick={()=>doTransition('review')} disabled={busy || hackathon.status!=='DRAFT'} className="rounded-xl bg-[#5aafbd] px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{busy?'…':'Send to review'}</button>
+          <button onClick={()=>doTransition('confirm')} disabled={busy || hackathon.status!=='REVIEW'} className="rounded-xl bg-[#f26a4f] px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{busy?'…':'Confirm'}</button>
+          <button onClick={()=>doTransition('publish')} disabled={busy || !publishReady} className="rounded-xl bg-[#d8e35b] px-3 py-2 text-xs font-bold text-[#171a2d] disabled:opacity-40">{busy?'…':'Publish'}</button>
         </div>
       </Card>
 
       {hackathon.status==='ARCHIVED' && <div className="rounded-2xl border border-[#dedbd1] bg-[#171a2d] p-4 flex items-start gap-3"><ShieldCheck size={16} className="mt-0.5 text-[#d8e35b]"/><div className="text-xs leading-5"><b className="text-white">ARCHIVED</b><span className="text-[#b9bdca]"> — This hackathon is archived and read-only.</span></div></div>}
 
-      {/* Administrative actions — archive lives here, never with publish controls */}
       {hackathon.status==='PUBLISHED' && (
         <Card className="p-4 border-red-200">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-xs">
-              <div className="font-bold">Administrative Actions</div>
+              <div className="font-bold">Archive</div>
               <div className="mt-1 text-[#77798a]">Archive this completed hackathon and make it read-only.</div>
             </div>
             <button onClick={()=>{ setArchiveChecked(false); setShowArchive(true); }} disabled={busy} className="rounded-xl border border-red-300 px-4 py-2 text-xs font-bold text-[#d74635] hover:bg-red-50 disabled:opacity-40">Archive Hackathon</button>
@@ -171,16 +164,14 @@ export default function OrganizerHackathonDetail(){
         </div>
       )}
 
-      {/* Hero */}
       <div className="grid gap-6 lg:grid-cols-[1.4fr_.8fr]">
         <Card className="p-6">
           <div className="flex items-start justify-between">
             <div><h2 className="font-bold">Overview</h2><p className="mt-1 text-sm leading-6 text-[#77798a]">{hackathon.description}</p></div>
-            <span className="rounded-full bg-[#f4f1e8] px-2 py-1 font-mono text-[10px]">v{hackathon.version}</span>
-          </div>
+                      </div>
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-xl bg-[#f4f1e8] p-3"><div className="font-mono text-[10px] uppercase text-[#77798a]">Type</div><div className="mt-1 text-sm font-bold">{hackathon.hackathonType}</div><div className="text-xs text-[#77798a]">{hackathon.mode} · {hackathon.duration}</div></div>
-            <div className="rounded-xl bg-[#f4f1e8] p-3"><div className="font-mono text-[10px] uppercase text-[#77798a]">Problem</div><div className="mt-1 text-xs leading-5 line-clamp-3">{hackathon.problemStatement || (hackathon.hackathonType==='OPEN_INNOVATION' ? 'Open objective — no fixed problem' : '—')}</div></div>
+            <div className="rounded-xl bg-[#f4f1e8] p-3"><div className="font-mono text-[10px] uppercase text-[#77798a]">Type</div><div className="mt-1 text-sm font-bold">{hackathon.hackathonType==='OPEN_INNOVATION' ? 'Open innovation' : 'Problem statement'}</div><div className="text-xs text-[#77798a]">{hackathon.mode} · {hackathon.duration}</div></div>
+            <div className="rounded-xl bg-[#f4f1e8] p-3"><div className="font-mono text-[10px] uppercase text-[#77798a]">Problem</div><div className="mt-1 text-xs leading-5 line-clamp-3">{hackathon.problemStatement || (hackathon.hackathonType==='OPEN_INNOVATION' ? 'Participants bring their own ideas' : '—')}</div></div>
             <div className="rounded-xl bg-[#f4f1e8] p-3"><div className="font-mono text-[10px] uppercase text-[#77798a]">Objective</div><div className="mt-1 text-xs leading-5 line-clamp-3">{hackathon.objective || '—'}</div></div>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -188,7 +179,7 @@ export default function OrganizerHackathonDetail(){
             <span className="rounded-full bg-[#e9e5da] px-2.5 py-1 text-[10px] font-bold uppercase">{hackathon.rules?.length||0} rules</span>
             <span className="rounded-full bg-[#d8e35b] px-2.5 py-1 text-[10px] font-bold uppercase">{hackathon.themeIds?.length||0} themes</span>
           </div>
-          {!canEdit && <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-700">Editing locked — only DRAFT/REVIEW can be edited via PATCH /hackathons/:id. This is {hackathon.status}.</div>}
+          {!canEdit && <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-700">This hackathon can only be edited while it is a draft or in review.</div>}
         </Card>
 
         <div className="rounded-2xl bg-[#171a2d] p-6 text-[#fdfbf5]">
@@ -207,15 +198,14 @@ export default function OrganizerHackathonDetail(){
               </div>
               <Link href="/organizer/analytics" className="inline-flex items-center gap-1 text-xs font-bold text-[#d8e35b]">Full analytics <ChevronRight size={14}/></Link>
             </div>
-          ) : <div className="mt-4 rounded-xl bg-[#252941] p-4 text-xs text-[#9b9fb1]">No analytics yet. Seed demo data or add phases/feedback.</div>}
+          ) : <div className="mt-4 rounded-xl bg-[#252941] p-4 text-xs text-[#9b9fb1]">No activity yet.</div>}
         </div>
       </div>
 
-      {/* Phases */}
       <Card className="p-6">
         <div className="flex items-center justify-between">
           <h3 className="font-bold flex items-center gap-2"><Calendar size={16}/> Phases · Timeline</h3>
-          <Link href="/organizer/hackathons/create" className="text-xs font-bold text-[#5aafbd]">Manage in wizard Step 6</Link>
+          <Link href="/organizer/hackathons/create" className="text-xs font-bold text-[#5aafbd]">Edit timeline</Link>
         </div>
         {phases.length ? (
           <>
@@ -231,35 +221,22 @@ export default function OrganizerHackathonDetail(){
                 </div>
               ))}
             </div>
-            <div className="mt-4 h-40">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e1d7"/>
-                  <XAxis dataKey="name" tick={{fontSize:10, fill:'#77798a'}} axisLine={false} tickLine={false}/>
-                  <YAxis tick={{fontSize:10, fill:'#77798a'}} axisLine={false} tickLine={false}/>
-                  <Tooltip/>
-                  <Bar dataKey="order" fill="#f26a4f" radius={[8,8,0,0]}/>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
           </>
-        ) : <div className="mt-4 rounded-xl bg-[#f4f1e8] p-4 text-xs text-[#77798a]">No phases configured. Go to wizard Step 6 to add registration → results timeline.</div>}
+        ) : <div className="mt-4 rounded-xl bg-[#f4f1e8] p-4 text-xs text-[#77798a]">No phases yet.</div>}
       </Card>
 
-      {/* Resources, Criteria, Mentors */}
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="p-6">
           <div className="flex items-center justify-between"><h3 className="font-bold flex items-center gap-2"><FileText size={16}/> Resources</h3><span className="font-mono text-xs text-[#77798a]">{resources.length}</span></div>
           <div className="mt-4 space-y-2">
-            {resources.length ? resources.map((r:any)=><div key={r.id} className="flex items-center justify-between rounded-xl border border-[#e5e1d7] bg-white px-3 py-2 text-sm"><span><b>{r.title}</b> <span className="rounded-full bg-[#f4f1e8] px-2 py-0.5 text-[10px] font-bold ml-1">{r.visibility}</span></span><span className="text-xs text-[#5aafbd]">{r.type}{r.url && <a href={r.url} target="_blank" className="ml-2 underline">Open</a>}</span></div>) : <div className="text-xs text-[#77798a]">No resources. Add in wizard Step 4.</div>}
+            {resources.length ? resources.map((r:any)=><div key={r.id} className="flex items-center justify-between rounded-xl border border-[#e5e1d7] bg-white px-3 py-2 text-sm"><span><b>{r.title}</b> <span className="rounded-full bg-[#f4f1e8] px-2 py-0.5 text-[10px] font-bold ml-1">{r.visibility}</span></span><span className="text-xs text-[#5aafbd]">{r.type}{r.url && <a href={r.url} target="_blank" className="ml-2 underline">Open</a>}</span></div>) : <div className="text-xs text-[#77798a]">No resources yet.</div>}
           </div>
-          <div className="mt-4 rounded-xl bg-[#f4f1e8] p-3 text-xs leading-5 text-[#77798a]">Visibility filtered per role. Organizer sees all.</div>
         </Card>
 
         <Card className="p-6">
           <div className="flex items-center justify-between"><h3 className="font-bold flex items-center gap-2"><Star size={16}/> Evaluation criteria</h3><span className="font-mono text-xs text-[#77798a]">{criteria.length}</span></div>
           <div className="mt-4 space-y-2">
-            {criteria.length ? criteria.map((c:any)=><div key={c.id} className="flex items-center justify-between rounded-xl bg-[#f4f1e8] px-3 py-2 text-sm"><span><b>{c.name}</b> <span className="text-xs text-[#77798a]">{c.description?.slice(0,40)||''}</span></span><span className="font-mono text-xs font-bold">{c.weight ? Math.round(c.weight*100)+'%' : ''} · max {c.maxScore}</span></div>) : <div className="text-xs text-[#77798a]">No criteria. Add in wizard Step 7. Known examples: Innovation, Technical implementation, Impact, UX...</div>}
+            {criteria.length ? criteria.map((c:any)=><div key={c.id} className="flex items-center justify-between rounded-xl bg-[#f4f1e8] px-3 py-2 text-sm"><span><b>{c.name}</b> <span className="text-xs text-[#77798a]">{c.description?.slice(0,40)||''}</span></span><span className="font-mono text-xs font-bold">{c.weight ? Math.round(c.weight*100)+'%' : ''} · max {c.maxScore}</span></div>) : <div className="text-xs text-[#77798a]">No criteria yet.</div>}
           </div>
           <Link href="/organizer/evaluations" className="mt-3 inline-flex text-xs font-bold text-[#f26a4f]">Manage evaluations <ChevronRight size={14}/></Link>
         </Card>
@@ -269,7 +246,7 @@ export default function OrganizerHackathonDetail(){
         <Card className="p-6">
           <div className="flex items-center justify-between"><h3 className="font-bold flex items-center gap-2"><Users size={16}/> Mentors & assignments</h3><span className="font-mono text-xs text-[#77798a]">{assignments.length}</span></div>
           <div className="mt-4 space-y-2">
-            {assignments.length ? assignments.map((a:any)=><div key={a.id} className="flex justify-between rounded-xl border border-[#e5e1d7] bg-white px-3 py-2 text-sm"><span>Mentor {a.mentorId.slice(0,8)} → Team {a.teamId.slice(0,12)}</span><span className="text-xs text-[#77798a]">{new Date(a.assignedAt).toLocaleDateString()}</span></div>) : <div className="text-xs text-[#77798a]">No mentor assignments. Manage mentors in the Mentors section.</div>}
+            {assignments.length ? assignments.map((a:any)=><div key={a.id} className="flex justify-between rounded-xl border border-[#e5e1d7] bg-white px-3 py-2 text-sm"><span>Mentor for {teams.find((t:any)=>t.id===a.teamId)?.name || 'a team'}</span><span className="text-xs text-[#77798a]">{new Date(a.assignedAt).toLocaleDateString()}</span></div>) : <div className="text-xs text-[#77798a]">No mentors assigned yet.</div>}
           </div>
           <Link href="/organizer/mentors" className="mt-3 inline-flex text-xs font-bold text-[#5aafbd]">View all mentors <ChevronRight size={14}/></Link>
         </Card>
@@ -282,9 +259,9 @@ export default function OrganizerHackathonDetail(){
           </div>
           {teams.length ? (
             <div className="mt-3 space-y-2 max-h-40 overflow-auto">
-              {teams.slice(0,4).map((t:any)=><div key={t.id} className="flex justify-between rounded-xl border border-[#e5e1d7] bg-white px-3 py-2 text-xs"><span><b>{t.name}</b> · {t.memberCount ?? t.members?.length ?? 0} members</span><button onClick={async()=>{ try{ await organizerApi.getPrivateRepo(t.id); setActionMsg('Unexpected: private repo exposed')}catch(e:any){ setActionErr(`Privacy boundary ✓ 403 for team ${t.id.slice(0,8)}: ${e.message}`)}} } className="rounded-lg bg-[#171a2d] px-2 py-1 text-[11px] font-bold text-white">Try private repo</button></div>)}
+              {teams.slice(0,4).map((t:any)=><div key={t.id} className="flex justify-between rounded-xl border border-[#e5e1d7] bg-white px-3 py-2 text-xs"><span><b>{t.name}</b> · {t.memberCount ?? t.members?.length ?? 0} members</span></div>)}
             </div>
-          ) : <div className="mt-3 text-xs text-[#77798a]">No teams yet. Seed demo or wait for participants.</div>}
+          ) : <div className="mt-3 text-xs text-[#77798a]">No teams yet.</div>}
           <div className="mt-3 flex gap-2">
             <Link href="/organizer/participants" className="flex-1 rounded-xl border border-[#dedbd1] px-3 py-2 text-center text-xs font-semibold">All participants</Link>
             <Link href="/organizer/teams" className="flex-1 rounded-xl bg-[#171a2d] px-3 py-2 text-center text-xs font-bold text-white">All teams</Link>

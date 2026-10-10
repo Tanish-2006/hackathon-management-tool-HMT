@@ -27,13 +27,8 @@ describe('AI Teammate hackathon scope', () => {
 
   it('old global route is handled safely (redirect, no unscoped workspace)', () => {
     const app = read('apps/participant-api/frontend/src/App.tsx');
-    expect(app).toContain('LegacyAIRedirect');
-    const legacy = read('apps/participant-api/frontend/src/pages/participant/hackathon-ai.tsx');
-    expect(legacy).toContain('LegacyAIRedirect');
-    expect(legacy).toContain('/participant/my-hackathons/');
-    // single registration auto-redirects; otherwise explanatory message
-    expect(legacy).toMatch(/setLocation\(`\/participant\/my-hackathons\//);
-    expect(legacy).toMatch(/no global AI workspace|moved into hackathon workspaces/i);
+    expect(app).toContain('<Route path="/participant/ai"><Redirect to="/participant/ai-helper" /></Route>');
+    expect(read('apps/participant-api/frontend/src/pages/participant/ai-helper.tsx')).toContain('useHackathonContext');
   });
 
   it('My Hackathons links to the hackathon-specific AI destination', () => {
