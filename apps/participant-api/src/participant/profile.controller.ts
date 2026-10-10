@@ -17,10 +17,14 @@ export class ProfileController {
 
   @Get()
   async getProfile(@Req() req: any) {
-    return this.prisma.profile.findUnique({
+    const profile: any = await this.prisma.profile.findUnique({
       where: { userId: req.user.id },
       include: { user: true },
     });
+    if (!profile?.user) return profile;
+    const { passwordHash, ...user } = profile.user;
+    void passwordHash;
+    return { ...profile, user };
   }
 
   @Put()

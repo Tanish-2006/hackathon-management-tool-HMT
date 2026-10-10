@@ -282,11 +282,8 @@ export const hmtBackendService = {
   // ---------- Profile & SkillProfile ----------
   async getProfile(): Promise<any> { const res = await fetchWithAuth('/profile'); return unwrap<any>(res); },
   async updateProfile(profileData: any): Promise<any> { const res = await fetchWithAuth('/profile', { method: 'PUT', body: JSON.stringify(profileData) }); return unwrap<any>(res); },
-  async getSkillProfile(): Promise<any> { try { const res = await fetchWithAuth('/skill-profile'); return unwrap<any>(res);} catch { return null; } },
-  async upsertSkillProfile(data: any): Promise<any> {
-    try { const res = await fetchWithAuth('/skill-profile', { method: 'PUT', body: JSON.stringify(data) }); return unwrap<any>(res); }
-    catch { const res = await fetchWithAuth('/skill-profile', { method: 'POST', body: JSON.stringify(data) }); return unwrap<any>(res); }
-  },
+  async getSkillProfile(): Promise<any> { try { const res = await fetchWithAuth('/skill-profile/me'); return unwrap<any>(res);} catch { return null; } },
+  async upsertSkillProfile(data: any): Promise<any> { const res = await fetchWithAuth('/skill-profile', { method: 'PUT', body: JSON.stringify(data) }); return unwrap<any>(res); },
 
   // ---------- Teams (hackathon-scoped: pass hackathonId to stay in context) ----------
   async getMyTeam(hackathonId?: string): Promise<any> {
@@ -444,6 +441,8 @@ export const hmtBackendService = {
     const res = await fetchWithAuth(`/performance/elimination-analysis${qs}`); return unwrap<any>(res);
   },
 
+  async getIdeation(hackathonId: string): Promise<IdeationState> { const res = await fetchWithAuth(`/ideation/${encodeURIComponent(hackathonId)}`); return unwrap<IdeationState>(res); },
+
   // ---------- Post-hackathon ----------
   async getRoadmap(): Promise<any> { const res = await fetchWithAuth('/post-hackathon/roadmap', { method: 'POST', body: JSON.stringify({}) }); return unwrap<any>(res); },
 };
@@ -456,4 +455,74 @@ export function isTokenReuseDetected(e: unknown): boolean {
   if (e instanceof ApiError) return e.code === 'TOKEN_REUSE_DETECTED';
   const msg = (e as Error)?.message || '';
   return msg.includes('TOKEN_REUSE') || msg.includes('Token reuse');
+}
+
+export type IdeationScope = 'team' | 'personal';
+export type IdeationRound = { title: string; goal: string; questions: string[]; exitCriteria: string };
+export type IdeationConfig = { currentRound: number; rounds: IdeationRound[]; extraInstructions?: string };
+export type IdeationMessage = { id: string; role: 'user' | 'assistant'; content: string; round: number; authorId: string | null; authorName: string | null; createdAt: string };
+export type IdeationTeam = { id: string; name: string; members: Array<{ id: string; name: string }> };
+export type IdeationState = {
+  hackathon: { id: string; title: string };
+  ideation: IdeationConfig;
+  currentRound: number;
+  configured: boolean;
+  team: IdeationTeam | null;
+  teamThread: IdeationMessage[] | null;
+  personalThread: IdeationMessage[];
+};
+export type IdeationStreamEvent =
+  | { event: 'start'; data: { round: number; scope: IdeationScope } }
+  | { event: 'delta'; data: { text: string } }
+  | { event: 'done'; data: { userMessageId: string; assistantMessageId: string | null; round: number } }
+  | { event: 'error'; data: { message: string } };
+
+export async function streamIdeationMessage(
+  hackathonId: string,
+  body: { scope: IdeationScope; content: string },
+  onEvent: (event: IdeationStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const send = () => {
+    const { access } = getTokens();
+    return fetch(`${BASE_URL}/ideation/${encodeURIComponent(hackathonId)}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'X-Request-Id': getRequestId(), ...(access ? { Authorization: `Bearer ${access}` } : {}) },
+      body: JSON.stringify(body),
+      signal,
+    });
+  };
+  let response = await send();
+  if (response.status === 401 && getTokens().refresh) {
+    await hmtBackendService.refresh();
+    response = await send();
+  }
+  if (!response.ok || !response.body) {
+    const text = await response.text().catch(() => '');
+    let parsed: any = {};
+    try { parsed = text ? JSON.parse(text) : {}; } catch { parsed = { message: text }; }
+    const raw = parsed?.error?.message ?? parsed?.message;
+    const message = Array.isArray(raw) ? raw.join(', ') : raw;
+    throw new ApiError(friendlyMessage(response.status, message), response.status, parsed?.error?.code);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+    let boundary = buffer.indexOf('\n\n');
+    while (boundary !== -1) {
+      const block = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      boundary = buffer.indexOf('\n\n');
+      const event = block.match(/^event: ?(.*)$/m)?.[1]?.trim();
+      const data = block.match(/^data: ?(.*)$/m)?.[1];
+      if (!event || data === undefined) continue;
+      let payload: unknown;
+      try { payload = JSON.parse(data); } catch { continue; }
+      onEvent({ event, data: payload } as IdeationStreamEvent);
+    }
+  }
 }

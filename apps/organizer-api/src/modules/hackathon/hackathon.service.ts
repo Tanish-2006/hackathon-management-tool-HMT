@@ -9,6 +9,7 @@ import { normalizeTimeline, verifyTimelineInWindow } from '../timeline/timeline-
 import { AIService } from '@hmt/ai';
 import { AIGateway } from '@hmt/ai';
 import { loadBaseEnv, resolveSyncSecret } from '@hmt/config';
+import { defaultIdeationConfig, type IdeationConfig } from '@hmt/contracts';
 
 // Hackathon scalar fields mapped to review-section provenance keys.
 const PROVENANCE_FIELD_MAP: Record<string, string> = {
@@ -879,70 +880,101 @@ export class HackathonService {
       updated.metadata = { ...(updated.metadata ?? {}), lastPublishedEventId: event.eventId };
       memoryStore.hackathons.set(id, updated);
       // Best-effort push to the participant read-model; never fails the transition.
-      void this.pushToParticipant(event).catch(() => undefined);
+      void this.pushToParticipant('/sync/consume', 'POST', event)
+        .then((delivered) => (delivered && updated.ideation ? this.pushIdeation(id, updated.ideation) : false))
+        .catch(() => undefined);
     }
 
     // If ARCHIVED, emit + push HackathonArchived so participant discovery
     // drops it from active views (terminal state, same channel as publish).
     if (target === 'ARCHIVED') {
       const event = await this.generateArchivedEvent(updated, organizerId);
-      void this.pushToParticipant(event).catch(() => undefined);
+      void this.pushToParticipant('/sync/consume', 'POST', event).catch(() => undefined);
     }
 
     return updated;
   }
 
-  /**
-   * Best-effort delivery of a domain event to the participant API.
-   * Skipped (with warning) when SYNC_SHARED_SECRET/PARTICIPANT_API_URL are
-   * unset; failures are audit-logged and never thrown — the local transition
-   * already succeeded and manual replay stays available via POST /:id/replay.
-   */
-  private async pushToParticipant(event: { eventId: string; type: string }): Promise<void> {
+  async getIdeation(id: string, userId: string): Promise<IdeationConfig> {
+    return this.requireOwnedHackathon(id, userId).ideation ?? defaultIdeationConfig();
+  }
+
+  async updateIdeation(id: string, userId: string, ideation: IdeationConfig, opts?: { ip?: string; requestId?: string }): Promise<IdeationConfig> {
+    const hackathon = this.requireOwnedHackathon(id, userId);
+    if (hackathon.status === 'ARCHIVED') throw Object.assign(new Error('Archived hackathons are read-only'), { statusCode: 400 });
+    const previousRound = hackathon.ideation?.currentRound ?? 1;
+    memoryStore.hackathons.set(id, { ...hackathon, ideation, updatedAt: new Date().toISOString() });
+    await auditService.log({
+      actorId: userId,
+      actorRole: 'ORGANIZER',
+      action: 'hackathon.ideation_updated',
+      resourceType: 'hackathon',
+      resourceId: id,
+      outcome: 'success',
+      ip: opts?.ip ?? null,
+      requestId: opts?.requestId ?? null,
+      metadata: { fromRound: previousRound, toRound: ideation.currentRound },
+    });
+    if (hackathon.status === 'PUBLISHED' && !(await this.pushIdeation(id, ideation))) {
+      throw Object.assign(new Error('Saved, but the participant app did not receive the update. Retry to sync.'), { statusCode: 502 });
+    }
+    return ideation;
+  }
+
+  private pushIdeation(id: string, ideation: IdeationConfig): Promise<boolean> {
+    return this.pushToParticipant(`/sync/ideation/${encodeURIComponent(id)}`, 'PUT', ideation);
+  }
+
+  private requireOwnedHackathon(id: string, userId: string): Hackathon {
+    const hackathon = memoryStore.hackathons.get(id);
+    if (!hackathon) throw Object.assign(new Error('Hackathon not found'), { statusCode: 404 });
+    if (hackathon.organizerId !== userId && memoryStore.users.get(userId)?.role !== 'ADMIN') {
+      throw Object.assign(new Error('Not owner'), { statusCode: 403 });
+    }
+    return hackathon;
+  }
+
+  private async pushToParticipant(path: string, method: 'POST' | 'PUT', body: object): Promise<boolean> {
     let base = '';
     let secret = '';
     try {
-      const env = loadBaseEnv();
-      base = (env.PARTICIPANT_API_URL ?? '').replace(/\/$/, '');
-      // Effective secret (explicit config or non-prod dev default).
+      base = (loadBaseEnv().PARTICIPANT_API_URL ?? '').replace(/\/$/, '');
       secret = resolveSyncSecret();
     } catch {
-      return;
+      return false;
     }
-    if (!base || !secret) return;
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 5000);
+    if (!base || !secret) return false;
+    const resourceId = 'eventId' in body ? String(body.eventId) : path;
+    const type = 'type' in body ? String(body.type) : path;
     try {
-      const res = await fetch(`${base}/sync/consume`, {
-        method: 'POST',
+      const res = await fetch(`${base}${path}`, {
+        method,
         headers: { 'Content-Type': 'application/json', 'x-sync-secret': secret },
-        body: JSON.stringify(event),
-        signal: ctrl.signal,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(5000),
       });
-      if (!res.ok) {
-        await auditService.log({
-          actorId: null,
-          actorRole: null,
-          action: 'hackathon.sync_push_failed',
-          resourceType: 'sync',
-          resourceId: event.eventId,
-          outcome: 'failure',
-          metadata: { type: event.type, status: res.status },
-        });
-      }
+      if (res.ok) return true;
+      await auditService.log({
+        actorId: null,
+        actorRole: null,
+        action: 'hackathon.sync_push_failed',
+        resourceType: 'sync',
+        resourceId,
+        outcome: 'failure',
+        metadata: { type, status: res.status },
+      });
     } catch {
       await auditService.log({
         actorId: null,
         actorRole: null,
         action: 'hackathon.sync_push_failed',
         resourceType: 'sync',
-        resourceId: event.eventId,
+        resourceId,
         outcome: 'failure',
-        metadata: { type: event.type },
+        metadata: { type },
       });
-    } finally {
-      clearTimeout(timer);
     }
+    return false;
   }
 
   private async generateArchivedEvent(

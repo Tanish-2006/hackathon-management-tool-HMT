@@ -4,7 +4,7 @@
 // NOTE: :3001 is legacy and MUST NOT be used (see HMT production readiness).
 function readEnv(key: string): string | undefined {
   try {
-    const v = (import.meta as any)?.env?.[key];
+    const v = (import.meta.env as Record<string, string | undefined>)[key];
     if (typeof v === 'string' && v.trim()) return v.trim();
   } catch { /* ignore */ }
   return undefined;

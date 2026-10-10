@@ -43,7 +43,13 @@ export class RateLimitGuard implements CanActivate {
       req.routeOptions?.url ?? req.route?.path ?? req.url;
     const route =
       typeof rawRoute === 'string' ? rawRoute.split('?')[0] : '/unknown';
-    const key = `${req.ip || 'ip'}:${route}:${req.user?.id || 'anon'}`;
+    const bodyIdentity =
+      typeof req.body?.email === 'string'
+        ? req.body.email.trim().toLowerCase()
+        : typeof req.body?.phoneNumber === 'string'
+          ? req.body.phoneNumber
+          : 'anon';
+    const key = `${req.ip || 'ip'}:${route}:${req.user?.id || bodyIdentity}`;
     const now = Date.now();
     sweepExpired(now);
     let bucket = buckets.get(key);

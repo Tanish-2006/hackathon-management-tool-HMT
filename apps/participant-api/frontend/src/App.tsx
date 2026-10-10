@@ -15,6 +15,7 @@ import MyHackathons from '@/pages/participant/my-hackathons';
 import ParticipantTeams from '@/pages/participant/teams';
 import ParticipantProjects from '@/pages/participant/projects';
 import { ParticipantHackathonAI, LegacyAIRedirect } from '@/pages/participant/hackathon-ai';
+import ParticipantAIHelper from '@/pages/participant/ai-helper';
 import ParticipantGithub from '@/pages/participant/github';
 import ParticipantPerformance from '@/pages/participant/performance';
 import ParticipantLearning from '@/pages/participant/learning';
@@ -54,6 +55,7 @@ const participantNav = [
   { href: '/participant/my-hackathons', label: 'My Hackathons', icon: Flag },
   { href: '/participant/teams', label: 'My Team', icon: Users },
   { href: '/participant/projects', label: 'My Project', icon: FileText },
+  { href: '/participant/ai-helper', label: 'AI Helper', icon: Sparkles },
   { href: '/participant/performance', label: 'Progress', icon: BarChart3 },
   { href: '/participant/profile', label: 'Profile', icon: Settings2 },
 ];
@@ -343,7 +345,7 @@ function Auth({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
         // organizer/mentor accounts via organizer API with explicit role.
         if (accountType === 'Participant') {
           const reg: any = await hmtBackendService.register({ fullName: name.trim(), email: cleanEmail, password, phoneNumber: cleanPhone });
-          justRegisteredPhone = cleanPhone;
+          if (reg?.phoneVerificationRequired !== false) justRegisteredPhone = cleanPhone;
           // Dev-only: backend returns the raw OTP in non-production for manual verification.
           if (reg?.phoneOtp) justRegisteredHint = String(reg.phoneOtp);
           justRegisteredKind = 'participant';
@@ -351,7 +353,7 @@ function Auth({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
           const roleStr: HmtRole = accountType === 'Mentor' ? 'MENTOR' : 'ORGANIZER';
           // Phase 1 phone identity: organizer/mentor registration collects phone (same rule).
           const reg: any = await organizerApi.register({ email: cleanEmail, password, fullName: name.trim(), displayName: name.trim(), role: roleStr, phoneNumber: cleanPhone });
-          justRegisteredPhone = cleanPhone;
+          if (reg?.phoneVerificationRequired !== false) justRegisteredPhone = cleanPhone;
           if (reg?.phoneOtp) justRegisteredHint = String(reg.phoneOtp);
           justRegisteredKind = 'organizer';
         }
@@ -524,6 +526,7 @@ function AppRoutes() { return <Switch>
 <Route path="/participant/my-hackathons">{() => <RequireParticipant><MyHackathons /></RequireParticipant>}</Route>
 <Route path="/participant/teams">{() => <RequireParticipant><ParticipantTeams /></RequireParticipant>}</Route>
 <Route path="/participant/projects">{() => <RequireParticipant><ParticipantProjects /></RequireParticipant>}</Route>
+<Route path="/participant/ai-helper">{() => <RequireParticipant><ParticipantAIHelper /></RequireParticipant>}</Route>
 <Route path="/participant/my-hackathons/:id/ai">{() => <RequireParticipant><ParticipantHackathonAI /></RequireParticipant>}</Route>
 <Route path="/participant/ai">{() => <RequireParticipant><LegacyAIRedirect /></RequireParticipant>}</Route>
 <Route path="/participant/github">{() => <RequireParticipant><ParticipantGithub /></RequireParticipant>}</Route>

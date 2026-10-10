@@ -1,4 +1,5 @@
 import type { Role } from '@hmt/common';
+import type { IdeationConfig } from '@hmt/contracts';
 
 // Re-export Role for convenience
 export type { Role };
@@ -78,6 +79,7 @@ export interface Hackathon {
   tags?: string[];
   organizerName?: string | null;
   metadata?: Record<string, unknown> | null;
+  ideation?: IdeationConfig;
 }
 
 export interface HackathonDraftInput {

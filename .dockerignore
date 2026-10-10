@@ -1,0 +1,13 @@
+node_modules
+**/node_modules
+**/dist
+.git
+.kilo
+.codegraph
+.remember
+**/.env
+**/.env.*
+!**/.env.example
+coverage
+**/coverage
+apps/participant-api/frontend/node_modules

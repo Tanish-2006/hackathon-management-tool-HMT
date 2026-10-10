@@ -768,38 +768,30 @@ export class TeamController {
     const existingMembership = await this.findMembershipInHackathon(req.user.id, team.hackathonId);
     if (existingMembership) throw new BadRequestException('Already in a team for this hackathon');
     return this.withTeamLock(`team:${team.id}`, async () => {
-      const dupe = await (this.prisma as any).teamJoinRequest.findFirst({
-        where: { teamId: team.id, userId: req.user.id, status: 'PENDING' },
-      });
-      if (dupe) throw new ConflictException('Join request already pending for this team');
+      const alreadyMember = await this.findMembershipInHackathon(req.user.id, team.hackathonId);
+      if (alreadyMember) throw new BadRequestException('Already in a team for this hackathon');
       const members = await this.prisma.teamMember.findMany({
         where: { teamId: team.id },
       } as any);
       if (members.length >= team.maxMembers) throw new BadRequestException('Team is full');
-      const record = await (this.prisma as any).teamJoinRequest.create({
-        data: {
-          teamId: team.id,
-          hackathonId: team.hackathonId,
-          userId: req.user.id,
-        },
-      });
+      const member = await this.prisma.teamMember.create({
+        data: { teamId: team.id, userId: req.user.id, role: 'MEMBER' },
+      } as any);
       await this.prisma.auditLog.create({
         data: {
           userId: req.user.id,
-          action: 'TEAM_JOIN_REQUESTED',
+          action: 'TEAM_JOINED',
           resource: `team:${team.id}`,
           details: { via: 'tid' },
         },
       } as any);
-      const applicant: any = await this.prisma.user.findUnique({ where: { id: req.user.id } } as any).catch(() => null);
+      const joiner: any = await this.prisma.user.findUnique({ where: { id: req.user.id } } as any).catch(() => null);
       await this.notifyLeader(team, {
-        type: 'JOIN_REQUESTED',
-        title: `New join request for ${team.name}`,
-        body: `${applicant?.fullName ?? 'A participant'} wants to join your team. Review it in Teams.`,
-        requestId: record.id,
-        requestKind: 'JOIN',
+        type: 'MEMBER_JOINED',
+        title: `${joiner?.fullName ?? 'A participant'} joined ${team.name}`,
+        body: `${joiner?.fullName ?? 'A participant'} joined your team with the team code.`,
       });
-      return { id: record.id, teamId: team.id, status: 'PENDING', message: 'Request sent — the team leader will review it.' };
+      return { id: member.id, teamId: team.id, hackathonId: team.hackathonId, status: 'JOINED', message: `You joined ${team.name}.` };
     });
   }
 
@@ -1203,10 +1195,15 @@ export class TeamController {
       return { message: 'Team deleted', teamId: team.id };
     });
   }
+  @Get(':id')
   async getTeamById(@Req() req: any, @Param('id') id: string) {
     const team = await this.prisma.team.findUnique({
       where: { id },
-      include: { members: true, project: true, hackathon: true },
+      include: {
+        members: { include: { user: { select: { id: true, fullName: true } } } },
+        project: true,
+        hackathon: true,
+      },
     } as any);
     if (!team) throw new NotFoundException('Team not found');
     const isMember = team.members?.some((m: any) => m.userId === req.user.id);

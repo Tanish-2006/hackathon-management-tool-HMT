@@ -85,6 +85,7 @@ export class AuthService {
       parallelism: 1,
     });
 
+    const phoneVerificationRequired = process.env.REQUIRE_PHONE_VERIFICATION !== 'false';
     let user: any;
     try {
       user = await this.prisma.user.create({
@@ -93,6 +94,7 @@ export class AuthService {
           passwordHash,
           fullName: dto.fullName,
           phoneNumber,
+          isPhoneVerified: !phoneVerificationRequired,
           role: Role.PARTICIPANT,
           profile: {
             create: {
@@ -137,7 +139,9 @@ export class AuthService {
     } as any);
 
     // Phase 1: phone is required at registration — issue the first OTP inline.
-    const phoneOtp = await this.issuePhoneOtp(user.id, phoneNumber);
+    const phoneOtp = phoneVerificationRequired
+      ? await this.issuePhoneOtp(user.id, phoneNumber)
+      : undefined;
 
     return {
       user: {
@@ -149,6 +153,7 @@ export class AuthService {
         phoneNumber: user.phoneNumber,
         isPhoneVerified: user.isPhoneVerified ?? false,
       },
+      phoneVerificationRequired,
       // Demo/testing only: raw verification token is emailed in production.
       ...(this.configService.get<string>('NODE_ENV') === 'production'
         ? {}

@@ -11,6 +11,7 @@ import type {
   HackathonStatus,
 } from '../domain/types';
 import { randomUUID } from 'crypto';
+import { PgMapStore } from '@hmt/common';
 
 // Central in-memory store. All services share this singleton.
 // In production this would delegate to @hmt/database Postgres + Prisma.
@@ -74,6 +75,22 @@ export class MemoryStore {
     this.projects.clear();
     this.teamMembers.clear();
     this.hackathonBySlug.clear();
+  }
+
+  async persistTo(connectionString: string): Promise<PgMapStore> {
+    const store = new PgMapStore(connectionString, 'organizer');
+    for (const [name, value] of Object.entries(this)) {
+      if (value instanceof Map) await store.attachMap(name, value);
+    }
+    await store.attachValue(
+      'outbox',
+      () => this.outbox,
+      (value) => {
+        this.outbox = value;
+      },
+    );
+    store.start();
+    return store;
   }
 
   // Helpers to enforce append-only audit

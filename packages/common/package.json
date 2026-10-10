@@ -12,10 +12,13 @@
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "pg": "^8.13.1"
   },
   "devDependencies": {
     "typescript": "^5.7.3",
-    "vitest": "^3.0.5"
+    "vitest": "^3.0.5",
+    "@types/pg": "^8.11.10",
+    "@types/node": "^22.10.0"
   }
 }

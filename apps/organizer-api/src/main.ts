@@ -20,6 +20,7 @@ import { participantsRoutes } from './modules/participants/participants.routes';
 import { syncRoutes } from './modules/sync/sync.routes';
 import { analyticsRoutes } from './modules/analytics/analytics.routes';
 import { overviewRoutes } from './modules/overview/overview.routes';
+import { memoryStore } from './store/memory.store';
 
 const startTime = Date.now();
 
@@ -318,7 +319,18 @@ async function start(): Promise<void> {
       'SYNC uses the well-known dev secret (no SYNC_SHARED_SECRET configured). Set a real SYNC_SHARED_SECRET on both APIs before any production use.',
     );
   }
+  const stateStore =
+    config.nodeEnv === 'production' || process.env.PERSIST_STATE === 'true'
+      ? await memoryStore.persistTo(env.DATABASE_URL)
+      : null;
   const app = await buildApp();
+  const shutdown = async (): Promise<void> => {
+    await app.close();
+    await stateStore?.close();
+    process.exit(0);
+  };
+  process.once('SIGTERM', () => void shutdown());
+  process.once('SIGINT', () => void shutdown());
   const port = env.ORGANIZER_API_PORT;
   // Dual-stack bind: `localhost` resolves to ::1 first on modern systems and
   // browsers attempt IPv6; an IPv4-only socket refuses them, which surfaces as
