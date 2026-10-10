@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { randomUUID } from 'node:crypto';
-import { loadBaseEnv, createAppConfig } from '@hmt/config';
+import { loadBaseEnv, createAppConfig, isDevSyncSecret } from '@hmt/config';
 import { createLogger } from '@hmt/observability';
 import { checkPostgresHealth, checkNeo4jHealth, getNeo4jDriver, checkRedisHealth, getRedisClient } from '@hmt/database';
 
@@ -312,6 +312,12 @@ async function buildApp(): Promise<FastifyInstance> {
 async function start(): Promise<void> {
   const env = loadBaseEnv();
   const config = createAppConfig(env);
+  if (isDevSyncSecret()) {
+    // console.warn is allowed by the no-console rule (warn/error permitted).
+    console.warn(
+      'SYNC uses the well-known dev secret (no SYNC_SHARED_SECRET configured). Set a real SYNC_SHARED_SECRET on both APIs before any production use.',
+    );
+  }
   const app = await buildApp();
   const port = env.ORGANIZER_API_PORT;
   // Dual-stack bind: `localhost` resolves to ::1 first on modern systems and

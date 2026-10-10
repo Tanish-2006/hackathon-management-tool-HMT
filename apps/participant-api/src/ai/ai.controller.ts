@@ -4,6 +4,7 @@ import {
   Get,
   Body,
   Param,
+  Query,
   UseGuards,
   Req,
   ForbiddenException,
@@ -112,14 +113,71 @@ export class AIController {
     }
   }
 
-  private async buildAIContext(userId: string, projectId?: string) {
+  /**
+   * Hackathon-scoped membership lookup (same pattern as Team/Project
+   * controllers). A participant may hold different teams in different
+   * hackathons — global `findFirst({ userId })` must never select the
+   * context. Returns the membership with its team, or null.
+   */
+  private async findMembershipInHackathon(userId: string, hackathonId: string): Promise<any | null> {
+    const memberships = (await this.prisma.teamMember.findMany({
+      where: { userId },
+    } as any).catch(() => [])) as any[];
+    for (const m of memberships || []) {
+      const team = await this.prisma.team.findUnique({
+        where: { id: m.teamId },
+      } as any).catch(() => null);
+      if (team && String((team as any).hackathonId) === String(hackathonId)) {
+        return { ...m, team };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Any-team membership check for a project. With per-hackathon teams, the
+   * caller's global first membership may belong to another hackathon — a
+   * project is authorized when ANY of the caller's memberships owns it.
+   * When hackathonId is supplied, the owning team must also belong to it.
+   */
+  private async findMembershipForProject(userId: string, projectTeamId: string, hackathonId?: string): Promise<any | null> {
+    const memberships = (await this.prisma.teamMember.findMany({
+      where: { userId },
+    } as any).catch(() => [])) as any[];
+    for (const m of memberships || []) {
+      if (m.teamId !== projectTeamId) continue;
+      if (!hackathonId) return m;
+      const team = await this.prisma.team.findUnique({
+        where: { id: m.teamId },
+      } as any).catch(() => null);
+      if (team && String((team as any).hackathonId) === String(hackathonId)) return { ...m, team };
+      return null;
+    }
+    return null;
+  }
+
+  private async buildAIContext(userId: string, projectId?: string, hackathonId?: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
     } as any);
-    const membership = await this.prisma.teamMember.findFirst({
-      where: { userId },
-      include: { team: { include: { hackathon: true, project: true } } } as any,
-    });
+    // Scoped membership first when a hackathon context is given; otherwise
+    // legacy first-membership behavior (callers without scope are unchanged).
+    let membership: any = null;
+    if (hackathonId) {
+      membership = await this.findMembershipInHackathon(userId, hackathonId);
+      if (membership?.teamId) {
+        const full = await this.prisma.teamMember.findFirst({
+          where: { userId, teamId: membership.teamId },
+          include: { team: { include: { hackathon: true, project: true } } } as any,
+        }).catch(() => null);
+        if (full) membership = full;
+      }
+    } else {
+      membership = await this.prisma.teamMember.findFirst({
+        where: { userId },
+        include: { team: { include: { hackathon: true, project: true } } } as any,
+      });
+    }
     const team = membership?.team || null;
     let project: any = null;
     let hackathon: any = null;
@@ -127,10 +185,25 @@ export class AIController {
     let authorizedRepoAnalysis: any = null;
 
     if (team?.hackathon && team.hackathon.isPublished) hackathon = team.hackathon;
+    if (!hackathon && hackathonId) {
+      const h = await (this.prisma as any).hackathon?.findUnique?.({ where: { id: hackathonId } }).catch(() => null);
+      if (h && h.isPublished) hackathon = h;
+    }
     if (projectId) {
-      project = await this.prisma.project.findUnique({
+      const candidate = await this.prisma.project.findUnique({
         where: { id: projectId },
       } as any);
+      // Fail closed: the project must belong to the scoped team. Without a
+      // hackathon scope, it must belong to one of the caller's teams (never
+      // the global first team alone).
+      if (candidate) {
+        if (team && candidate.teamId === membership.teamId) {
+          project = candidate;
+        } else if (!team && !hackathonId) {
+          const owner = await this.findMembershipForProject(userId, candidate.teamId);
+          if (owner) project = candidate;
+        }
+      }
     } else if (team?.project) {
       project = team.project;
     }
@@ -195,20 +268,29 @@ export class AIController {
   }
 
   @Get('access-status')
-  async accessStatus(@Req() req: any) {
+  async accessStatus(
+    @Req() req: any,
+    @Query('projectId') projectId?: string,
+    @Query('hackathonId') hackathonId?: string,
+  ) {
     if (!this.aiAccess) return { allowed: false, code: 'NO_SERVICE' };
-    // Query ?projectId= supported via req.query when present.
-    const projectId = (req.query?.projectId as string) || undefined;
-    return this.aiAccess.checkAccess(req.user.id, projectId);
+    // Query ?projectId= / ?hackathonId= supported. Both are verified against
+    // team/project membership inside AiAccessService — never trusted alone.
+    const pid = projectId || (req.query?.projectId as string) || undefined;
+    const hid = hackathonId || (req.query?.hackathonId as string) || undefined;
+    return this.aiAccess.checkAccess(req.user.id, pid, hid);
   }
 
   @Post('chat')
   async chatWithTeammate(@Req() req: any, @Body() dto: AIChatDto) {
     const started = Date.now();
     const projectId = dto.projectId || null;
-    // Backend live-window enforcement (never frontend-only).
+    const hackathonId = (dto as any).hackathonId || null;
+    // Backend live-window enforcement (never frontend-only). The hackathon
+    // scope is verified against membership — a team in hackathon A never
+    // authorizes hackathon B's context.
     if (this.aiAccess) {
-      const access = await this.aiAccess.checkAccess(req.user.id, projectId || undefined);
+      const access = await this.aiAccess.checkAccess(req.user.id, projectId || undefined, hackathonId || undefined);
       if (!access.allowed) {
         throw new ForbiddenException({
           code: access.code,
@@ -227,16 +309,19 @@ export class AIController {
         where: { id: projectId },
       } as any);
       if (!project) throw new NotFoundException('Project not found');
-      const membership = await this.prisma.teamMember.findFirst({
-        where: { userId: req.user.id },
-      } as any);
-      if (!membership || membership.teamId !== project.teamId)
+      // Per-hackathon IDOR: ANY of the caller's memberships may own the
+      // project (not just the global first), and a supplied hackathon scope
+      // must match the owning team.
+      const owner = await this.findMembershipForProject(req.user.id, project.teamId, hackathonId || undefined);
+      if (!owner)
         throw new ForbiddenException(
           'Not member of project team (IDOR prevented)',
         );
+      if (hackathonId && project.hackathonId && String(project.hackathonId) !== String(hackathonId))
+        throw new ForbiddenException('Project does not belong to this hackathon');
     }
 
-    aiContext = await this.buildAIContext(req.user.id, projectId || undefined);
+    aiContext = await this.buildAIContext(req.user.id, projectId || undefined, hackathonId || undefined);
 
     let targeted: { relevantFiles: Array<{ path: string; content: string; retrievalReason: string }>; readmeContext: string | null } = {
       relevantFiles: [],
@@ -369,7 +454,7 @@ export class AIController {
     @Body() dto: CreateConversationDto,
   ) {
     if (this.aiAccess) {
-      const access = await this.aiAccess.checkAccess(req.user.id, dto.projectId);
+      const access = await this.aiAccess.checkAccess(req.user.id, dto.projectId, (dto as any).hackathonId);
       if (!access.allowed) {
         throw new ForbiddenException({
           code: access.code,
@@ -381,16 +466,17 @@ export class AIController {
     }
     const started = Date.now();
     const projectId = dto.projectId;
+    const hackathonId = (dto as any).hackathonId;
     if (projectId) {
       const proj = await this.prisma.project.findUnique({
         where: { id: projectId },
       } as any);
       if (!proj) throw new NotFoundException('Project not found');
-      const mem = await this.prisma.teamMember.findFirst({
-        where: { userId: req.user.id },
-      } as any);
-      if (!mem || mem.teamId !== proj.teamId)
+      const owner = await this.findMembershipForProject(req.user.id, proj.teamId, hackathonId);
+      if (!owner)
         throw new ForbiddenException('Not member');
+      if (hackathonId && proj.hackathonId && String(proj.hackathonId) !== String(hackathonId))
+        throw new ForbiddenException('Project does not belong to this hackathon');
     }
     const conv = await this.prisma.aiConversation.create({
       data: {
@@ -406,7 +492,7 @@ export class AIController {
         content: dto.initialMessage,
       },
     } as any);
-    const aiContext = await this.buildAIContext(req.user.id, projectId);
+    const aiContext = await this.buildAIContext(req.user.id, projectId, hackathonId);
     let targeted2: { relevantFiles: Array<{ path: string; content: string; retrievalReason: string }>; readmeContext: string | null } = {
       relevantFiles: [],
       readmeContext: null,
@@ -474,7 +560,38 @@ export class AIController {
   }
 
   @Get('conversations')
-  async listConversations(@Req() req: any) {
+  async listConversations(
+    @Req() req: any,
+    @Query('projectId') projectId?: string,
+    @Query('hackathonId') hackathonId?: string,
+  ) {
+    // Conversation isolation: a hackathon workspace lists only conversations
+    // for its own project. Without a scope, legacy behavior (all of the
+    // caller's conversations) is preserved for backward compatibility.
+    const pid = projectId || (req.query?.projectId as string) || undefined;
+    const hid = hackathonId || (req.query?.hackathonId as string) || undefined;
+    if (pid) {
+      const proj = await this.prisma.project.findUnique({ where: { id: pid } } as any).catch(() => null);
+      if (!proj) return [];
+      const owner = await this.findMembershipForProject(req.user.id, proj.teamId, hid);
+      if (!owner) return [];
+      const convs = await this.prisma.aiConversation.findMany({
+        where: { userId: req.user.id, projectId: pid },
+        orderBy: { createdAt: 'desc' },
+      } as any);
+      return convs;
+    }
+    if (hid) {
+      const scoped = await this.findMembershipInHackathon(req.user.id, hid);
+      if (!scoped?.teamId) return [];
+      const teamProject = await this.prisma.project.findUnique({ where: { teamId: scoped.teamId } } as any).catch(() => null);
+      if (!teamProject?.id) return [];
+      const convs = await this.prisma.aiConversation.findMany({
+        where: { userId: req.user.id, projectId: teamProject.id },
+        orderBy: { createdAt: 'desc' },
+      } as any);
+      return convs;
+    }
     const convs = await this.prisma.aiConversation.findMany({
       where: { userId: req.user.id },
       orderBy: { createdAt: 'desc' },
@@ -490,6 +607,16 @@ export class AIController {
     if (!conv) throw new NotFoundException('Conversation not found');
     if (conv.userId !== req.user.id && req.user.role !== 'ADMIN')
       throw new ForbiddenException('Not your conversation (IDOR prevented)');
+    // Cross-team isolation: when the conversation is attached to a project,
+    // the caller must still hold that project's team (grants/revokes and
+    // team changes after creation must not leak history).
+    if (conv.projectId) {
+      const proj = await this.prisma.project.findUnique({ where: { id: conv.projectId } } as any).catch(() => null);
+      if (!proj) throw new NotFoundException('Conversation project not found');
+      const owner = await this.findMembershipForProject(req.user.id, proj.teamId);
+      if (!owner && req.user.role !== 'ADMIN')
+        throw new ForbiddenException('Not member of conversation project team (IDOR prevented)');
+    }
     const messages = await this.prisma.aiMessage.findMany({
       where: { conversationId: id },
       orderBy: { createdAt: 'asc' },
@@ -503,8 +630,23 @@ export class AIController {
     @Param('id') id: string,
     @Body() dto: AIChatDto,
   ) {
+    const conv = await this.prisma.aiConversation.findUnique({
+      where: { id },
+    } as any);
+    if (!conv) throw new NotFoundException('Conversation not found');
+    if (conv.userId !== req.user.id)
+      throw new ForbiddenException('IDOR prevented');
+    // A conversation is bound to its project at creation: a client-supplied
+    // projectId that disagrees is rejected (prevents cross-project injection
+    // of hackathon B questions into hackathon A history and vice versa).
+    const bodyProjectId = dto.projectId || null;
+    const bodyHackathonId = (dto as any).hackathonId || null;
+    if (conv.projectId && bodyProjectId && conv.projectId !== bodyProjectId) {
+      throw new ForbiddenException('Conversation belongs to another project');
+    }
+    const effectiveProjectId = (conv.projectId || bodyProjectId || null) as string | null;
     if (this.aiAccess) {
-      const access = await this.aiAccess.checkAccess(req.user.id, dto.projectId);
+      const access = await this.aiAccess.checkAccess(req.user.id, effectiveProjectId || undefined, bodyHackathonId || undefined);
       if (!access.allowed) {
         throw new ForbiddenException({
           code: access.code,
@@ -515,16 +657,10 @@ export class AIController {
       }
     }
     const started = Date.now();
-    const conv = await this.prisma.aiConversation.findUnique({
-      where: { id },
-    } as any);
-    if (!conv) throw new NotFoundException('Conversation not found');
-    if (conv.userId !== req.user.id)
-      throw new ForbiddenException('IDOR prevented');
     await this.prisma.aiMessage.create({
       data: { conversationId: id, role: 'USER', content: dto.message },
     } as any);
-    const aiContext = await this.buildAIContext(req.user.id, conv.projectId);
+    const aiContext = await this.buildAIContext(req.user.id, effectiveProjectId || undefined, bodyHackathonId || undefined);
     let targeted3: { relevantFiles: Array<{ path: string; content: string; retrievalReason: string }>; readmeContext: string | null } = {
       relevantFiles: [],
       readmeContext: null,
@@ -582,8 +718,9 @@ export class AIController {
   // ---------- AI Analysis Job Contract ----------
   @Post('analysis-jobs')
   async createAnalysisJob(@Req() req: any, @Body() dto: CreateAnalysisJobDto) {
+    const hackathonId = (dto as any).hackathonId;
     if (this.aiAccess) {
-      const access = await this.aiAccess.checkAccess(req.user.id, dto.projectId);
+      const access = await this.aiAccess.checkAccess(req.user.id, dto.projectId, hackathonId);
       if (!access.allowed) {
         throw new ForbiddenException({
           code: access.code,
@@ -597,11 +734,11 @@ export class AIController {
       where: { id: dto.projectId },
     } as any);
     if (!project) throw new NotFoundException('Project not found');
-    const membership = await this.prisma.teamMember.findFirst({
-      where: { userId: req.user.id },
-    } as any);
-    if (!membership || membership.teamId !== project.teamId)
+    const owner = await this.findMembershipForProject(req.user.id, project.teamId, hackathonId);
+    if (!owner)
       throw new ForbiddenException('IDOR prevented');
+    if (hackathonId && project.hackathonId && String(project.hackathonId) !== String(hackathonId))
+      throw new ForbiddenException('Project does not belong to this hackathon');
     const hasGrant = await this.checkRepositoryAccess(
       dto.projectId,
       req.user.id,
@@ -718,10 +855,8 @@ export class AIController {
       where: { id: job.projectId },
     } as any);
     if (!project) throw new NotFoundException('Project not found');
-    const membership = await this.prisma.teamMember.findFirst({
-      where: { userId: req.user.id },
-    } as any);
-    if (!membership || membership.teamId !== project.teamId)
+    const owner = await this.findMembershipForProject(req.user.id, project.teamId);
+    if (!owner)
       throw new ForbiddenException('IDOR prevented');
     const hasGrant = await this.checkRepositoryAccess(job.projectId, req.user.id);
     if (!hasGrant) throw new ForbiddenException('AI findings require grant');
@@ -735,7 +870,33 @@ export class AIController {
   }
 
   @Get('analysis-jobs')
-  async listAnalysisJobs(@Req() req: any) {
+  async listAnalysisJobs(@Req() req: any, @Query('projectId') projectId?: string, @Query('hackathonId') hackathonId?: string) {
+    const pid = projectId || (req.query?.projectId as string) || undefined;
+    const hid = hackathonId || (req.query?.hackathonId as string) || undefined;
+    // Scoped listing: one hackathon's jobs only. Unscoped legacy callers keep
+    // first-membership behavior.
+    if (pid || hid) {
+      let targetPid: string | null = pid ?? null;
+      if (!targetPid && hid) {
+        const scoped = await this.findMembershipInHackathon(req.user.id, hid);
+        if (!scoped?.teamId) return { jobs: [] };
+        const tp = await this.prisma.project.findUnique({ where: { teamId: scoped.teamId } } as any).catch(() => null);
+        if (!tp?.id) return { jobs: [] };
+        targetPid = tp.id;
+      }
+      if (!targetPid) return { jobs: [] };
+      const proj = await this.prisma.project.findUnique({ where: { id: targetPid } } as any).catch(() => null);
+      if (!proj) return { jobs: [] };
+      const owner = await this.findMembershipForProject(req.user.id, proj.teamId, hid);
+      if (!owner) return { jobs: [] };
+      const hasGrant = await this.checkRepositoryAccess(targetPid, req.user.id);
+      if (!hasGrant) return { jobs: [] };
+      const jobs = await this.prisma.aiAnalysisJob.findMany({
+        where: { projectId: targetPid },
+        orderBy: { createdAt: 'desc' },
+      } as any);
+      return { jobs };
+    }
     const membership = await this.prisma.teamMember.findFirst({
       where: { userId: req.user.id },
       include: { team: { include: { project: true } } },
@@ -761,10 +922,8 @@ export class AIController {
       where: { id: job.projectId },
     } as any);
     if (!project) throw new NotFoundException('Project not found');
-    const membership = await this.prisma.teamMember.findFirst({
-      where: { userId: req.user.id },
-    } as any);
-    if (!membership || membership.teamId !== project.teamId)
+    const owner = await this.findMembershipForProject(req.user.id, project.teamId);
+    if (!owner)
       throw new ForbiddenException('IDOR prevented');
     const hasGrant = await this.checkRepositoryAccess(
       job.projectId,

@@ -40,6 +40,10 @@ export class SyncService {
       hackathonType: p.hackathonType ?? 'OPEN_INNOVATION',
       organizer: p.organizerName ?? null,
       organizerName: p.organizerName ?? null,
+      objective: p.objective ?? '',
+      audience: p.audience ?? null,
+      constraints: p.constraints ?? [],
+      expectedOutcomes: p.expectedOutcomes ?? [],
       problemStatement: p.problemStatement ?? null,
       rules: p.rules ?? [],
       resources: (p.resources ?? []).map((r: any) => ({
@@ -66,6 +70,11 @@ export class SyncService {
       endDate: p.eventEnd ?? null,
       publishedAt: p.publishedAt,
       theme: p.theme ?? null,
+      themeIds: p.themeIds ?? [],
+      // Repository requirement (organizer wizard Step 8). Old events lack
+      // the field → OPTIONAL keeps existing hackathons working unchanged.
+      repoRequirement:
+        p.repoRequirement === 'REQUIRED' || p.repoRequirement === 'DISABLED' ? p.repoRequirement : 'OPTIONAL',
     };
     await (this.prisma.hackathon as any).upsert({
       where: { id: p.hackathonId },
@@ -80,6 +89,16 @@ export class SyncService {
   }
 
   async consumeMany(events: unknown[]) {
+    // Bound batch size — unbounded loops are a CPU/memory DoS vector.
+    // Max 200 to match POST /sync/pull's outbox limit; the public
+    // POST /sync/consume-batch endpoint enforces a stricter 100.
+    const MAX_BATCH = 200;
+    if (!Array.isArray(events)) {
+      throw Object.assign(new Error('Invalid batch: events must be an array'), { status: 400 });
+    }
+    if (events.length > MAX_BATCH) {
+      throw Object.assign(new Error(`Invalid batch: max ${MAX_BATCH} events per request`), { status: 400 });
+    }
     const results: Array<Record<string, unknown>> = [];
     for (const e of events) {
       try {
@@ -91,11 +110,12 @@ export class SyncService {
     return results;
   }
 
-  /** Dispatch by event type; unknown types fall through to the published path. */
+  /** Dispatch by event type; unknown types are rejected (never fall through to published). */
   async consume(event: unknown) {
     const type = (event as any)?.type;
     if (type === 'HackathonArchived') return this.consumeArchivedEvent(event);
-    return this.consumePublishedEvent(event);
+    if (type === 'HackathonPublished') return this.consumePublishedEvent(event);
+    throw Object.assign(new Error(`Unsupported event type: ${String(type ?? 'unknown')}`), { status: 400 });
   }
 
   /**

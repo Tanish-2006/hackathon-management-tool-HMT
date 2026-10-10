@@ -37,7 +37,12 @@ export class RateLimitGuard implements CanActivate {
     // Skip in test env to avoid flaky tests.
     if (process.env.NODE_ENV === 'test') return true;
     const req = context.switchToHttp().getRequest();
-    const route = req.routeOptions?.url ?? req.route?.path ?? req.url;
+    // Use the route pattern only — req.url includes the query string, so
+    // keying on it lets attackers bypass limits with ?x=<random>.
+    const rawRoute: unknown =
+      req.routeOptions?.url ?? req.route?.path ?? req.url;
+    const route =
+      typeof rawRoute === 'string' ? rawRoute.split('?')[0] : '/unknown';
     const key = `${req.ip || 'ip'}:${route}:${req.user?.id || 'anon'}`;
     const now = Date.now();
     sweepExpired(now);

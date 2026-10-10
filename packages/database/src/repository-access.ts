@@ -16,14 +16,43 @@ export interface RepositoryAccessCheck {
     status: 'ACTIVE' | 'REVOKED' | 'EXPIRED';
     revokedAt: Date | null;
     expiresAt: Date | null;
+    // Optional scoping — when present, the grant only authorizes this team/repo.
+    // Grants without these fields (legacy) are treated as unscoped; callers
+    // MUST filter grants by teamId/repositoryIdentifier before calling.
+    teamId?: string | null;
+    repositoryIdentifier?: string | null;
   }>;
 }
 
 export function canAccessRepository(check: RepositoryAccessCheck): boolean {
-  // Default deny: no grants => no access
-  const now = new Date();
+  // Default deny: no grants => no access. Also deny on empty identifiers.
+  if (!check || typeof check !== 'object') return false;
+  if (!check.requesterId || !check.teamId || !check.repositoryIdentifier) return false;
+  if (!Array.isArray(check.grants)) return false;
+  const nowMs = Date.now();
+  // Clock-skew tolerance: treat expiresAt === now as still valid for up to 30s.
+  const skewMs = 30_000;
+  const expiryToMs = (v: Date | string | null | undefined): number | null => {
+    if (v == null) return null;
+    const ms = v instanceof Date ? v.getTime() : new Date(v as string).getTime();
+    return Number.isFinite(ms) ? ms : null;
+  };
   const activeGrants = check.grants.filter(
-    (g) => g.status === 'ACTIVE' && !g.revokedAt && (!g.expiresAt || g.expiresAt > now),
+    (g) => {
+      if (!g || typeof g !== 'object') return false;
+      if (g.status !== 'ACTIVE' || g.revokedAt) return false;
+      const expMs = expiryToMs(g.expiresAt as unknown as Date | string | null);
+      // Unparseable expiry fails closed (deny) rather than granting forever.
+      if (g.expiresAt != null && expMs == null) return false;
+      if (expMs != null && !(expMs + skewMs > nowMs)) return false;
+      return true;
+    },
+  ).filter(
+    (g) =>
+      // Enforce scoping when the grant carries it — a grant for repo A
+      // must never authorize repo B.
+      (g.teamId == null || g.teamId === check.teamId) &&
+      (g.repositoryIdentifier == null || g.repositoryIdentifier === check.repositoryIdentifier),
   );
   if (activeGrants.length === 0) return false;
 

@@ -13,15 +13,19 @@ export const apiEnvelopeSchema = <T extends z.ZodTypeAny>(dataSchema: T) =>
     data: dataSchema,
     meta: z
       .object({
-        requestId: z.string().min(1),
+        requestId: z.string().min(1).max(128),
         timestamp: z.string().datetime(),
         pagination: z
           .object({
-            page: z.number().int().min(1),
-            pageSize: z.number().int().min(1),
+            page: z.number().int().min(1).max(10000),
+            pageSize: z.number().int().min(1).max(100),
             total: z.number().int().min(0),
             totalPages: z.number().int().min(0),
           })
+          .refine(
+            (p) => p.totalPages === Math.ceil(p.total / p.pageSize),
+            { message: 'totalPages must equal ceil(total / pageSize)' },
+          )
           .optional(),
       })
       .optional(),
@@ -45,10 +49,10 @@ export const healthResponseSchema = z.object({
   version: z.string().min(1),
   uptimeSeconds: z.number().min(0),
   checks: z.object({
-    api: z.enum(['ok', 'down']),
-    postgres: z.enum(['ok', 'down', 'unknown']),
-    neo4j: z.enum(['ok', 'down', 'unknown']),
-    redis: z.enum(['ok', 'down', 'unknown']),
+    api: z.enum(['ok', 'degraded', 'down']),
+    postgres: z.enum(['ok', 'down', 'unknown', 'degraded']),
+    neo4j: z.enum(['ok', 'down', 'unknown', 'degraded']),
+    redis: z.enum(['ok', 'down', 'unknown', 'degraded']),
   }),
 });
 

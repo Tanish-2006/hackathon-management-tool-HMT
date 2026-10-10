@@ -71,20 +71,37 @@ export class PerformanceController {
 
   // ---------- Timeline (requires ownership) ----------
   @Get('timeline')
-  async getPerformanceTimeline(@Req() req: any) {
-    const membership = await this.prisma.teamMember.findFirst({
-      where: { userId: req.user.id },
-      include: { team: { include: { project: true } } },
-    } as any);
+  async getPerformanceTimeline(@Req() req: any, @Query('projectId') projectId?: string) {
+    // Optional project scoping for multi-hackathon participants (additive:
+    // without the parameter, legacy first-membership behavior applies).
+    let membership: any = null;
+    let scopedProject: any = null;
+    if (projectId) {
+      scopedProject = await this.prisma.project.findUnique({
+        where: { id: projectId },
+      } as any);
+      if (!scopedProject) throw new NotFoundException('Project not found');
+      membership = await this.prisma.teamMember.findFirst({
+        where: { userId: req.user.id, teamId: scopedProject.teamId },
+      } as any);
+      if (req.user.role === 'PARTICIPANT' && !membership)
+        throw new ForbiddenException('IDOR prevented');
+    } else {
+      membership = await this.prisma.teamMember.findFirst({
+        where: { userId: req.user.id },
+        include: { team: { include: { project: true } } },
+      } as any);
 
-    if (!membership?.team?.project) {
-      return {
-        timeline: [],
-        message: 'No project associated with participant team.',
-      };
+      if (!membership?.team?.project) {
+        return {
+          timeline: [],
+          message: 'No project associated with participant team.',
+        };
+      }
+      scopedProject = membership.team.project;
     }
 
-    const projectId = membership.team.project.id;
+    const projectIdResolved = scopedProject.id;
 
     const [
       feedbacks,
@@ -96,28 +113,28 @@ export class PerformanceController {
     ] = await Promise.all([
       // Only published feedback visible to participant; but timeline aggregates all? spec says only published returned
       this.prisma.mentorFeedback.findMany({
-        where: { projectId, isPublished: true },
+        where: { projectId: projectIdResolved, isPublished: true },
         orderBy: { createdAt: 'desc' },
       } as any),
       this.prisma.repositoryScan.findMany({
-        where: { projectId },
+        where: { projectId: projectIdResolved },
         orderBy: { createdAt: 'desc' },
         include: { findings: true },
       } as any),
-      this.prisma.eliminationRecord.findUnique({ where: { projectId } } as any),
+      this.prisma.eliminationRecord.findUnique({ where: { projectId: projectIdResolved } } as any),
       this.prisma.phaseProgress
-        .findMany({ where: { projectId, isPublished: true } } as any)
+        .findMany({ where: { projectId: projectIdResolved, isPublished: true } } as any)
         .catch(() => []),
       this.prisma.mistake
-        .findMany({ where: { projectId, isPublished: true } } as any)
+        .findMany({ where: { projectId: projectIdResolved, isPublished: true } } as any)
         .catch(() => []),
       this.prisma.evaluation
-        .findMany({ where: { projectId, isPublished: true } } as any)
+        .findMany({ where: { projectId: projectIdResolved, isPublished: true } } as any)
         .catch(() => []),
     ]);
 
     return {
-      projectId,
+      projectId: projectIdResolved,
       feedbacks,
       scans,
       elimination,
@@ -274,12 +291,14 @@ export class PerformanceController {
         where: { id: pid },
       } as any);
       if (!proj) throw new NotFoundException('Project not found');
+      // Explicit team match: with per-hackathon memberships the caller's
+      // first membership may belong to another team (false denial).
       const membership = await this.prisma.teamMember.findFirst({
-        where: { userId: req.user.id },
+        where: { userId: req.user.id, teamId: proj.teamId },
       } as any);
       if (
         req.user.role === 'PARTICIPANT' &&
-        (!membership || membership.teamId !== proj.teamId)
+        !membership
       ) {
         throw new ForbiddenException(
           'Not authorized to view feedback for this project (IDOR prevented)',
@@ -319,10 +338,11 @@ export class PerformanceController {
       where: { id: fb.projectId },
     } as any);
     if (!proj) throw new NotFoundException('Project not found');
+    // Explicit team match (per-hackathon memberships).
     const membership = await this.prisma.teamMember.findFirst({
-      where: { userId: req.user.id },
+      where: { userId: req.user.id, teamId: proj.teamId },
     } as any);
-    const isMember = !!membership && membership.teamId === proj.teamId;
+    const isMember = !!membership;
     const isOrganizer = ['ORGANIZER', 'ADMIN', 'MENTOR'].includes(
       req.user.role,
     );
@@ -414,12 +434,13 @@ export class PerformanceController {
         where: { id: pid },
       } as any);
       if (!proj) throw new NotFoundException('Project not found');
+      // Explicit team match (per-hackathon memberships).
       const membership = await this.prisma.teamMember.findFirst({
-        where: { userId: req.user.id },
+        where: { userId: req.user.id, teamId: proj.teamId },
       } as any);
       if (
         req.user.role === 'PARTICIPANT' &&
-        (!membership || membership.teamId !== proj.teamId)
+        !membership
       )
         throw new ForbiddenException('IDOR prevented');
     }
@@ -439,6 +460,15 @@ export class PerformanceController {
       where: { id: dto.projectId },
     } as any);
     if (!project) throw new NotFoundException('Project not found');
+    // Authorization: own-team members or staff only. An open create would let
+    // any participant forge progress/scores for rival projects.
+    if (!['MENTOR', 'ORGANIZER', 'ADMIN'].includes(req.user.role)) {
+      const membership = await this.prisma.teamMember.findFirst({
+        where: { userId: req.user.id, teamId: project.teamId },
+      } as any);
+      if (!membership)
+        throw new ForbiddenException('Only team members can log phase progress (IDOR prevented)');
+    }
     // allow mentor/organizer to create; participant read only? but allow for demo
     const pp = await this.prisma.phaseProgress.create({
       data: {
@@ -465,6 +495,17 @@ export class PerformanceController {
       } as any);
       if (!membership?.team?.project) return { phaseProgress: [] };
       pid = membership.team.project.id;
+    } else {
+      // IDOR check consistent with feedback/evaluations: explicit team match.
+      const proj = await this.prisma.project.findUnique({
+        where: { id: pid },
+      } as any);
+      if (!proj) throw new NotFoundException('Project not found');
+      const membership = await this.prisma.teamMember.findFirst({
+        where: { userId: req.user.id, teamId: proj.teamId },
+      } as any);
+      if (req.user.role === 'PARTICIPANT' && !membership)
+        throw new ForbiddenException('IDOR prevented');
     }
     const pp = await this.prisma.phaseProgress.findMany({
       where: { projectId: pid, isPublished: true },
@@ -479,6 +520,14 @@ export class PerformanceController {
       where: { id: dto.projectId },
     } as any);
     if (!project) throw new NotFoundException('Project not found');
+    // Authorization: own-team members or staff only (see phase-progress).
+    if (!['MENTOR', 'ORGANIZER', 'ADMIN'].includes(req.user.role)) {
+      const membership = await this.prisma.teamMember.findFirst({
+        where: { userId: req.user.id, teamId: project.teamId },
+      } as any);
+      if (!membership)
+        throw new ForbiddenException('Only team members can log mistakes (IDOR prevented)');
+    }
     const m = await this.prisma.mistake.create({
       data: {
         projectId: dto.projectId,
@@ -507,12 +556,13 @@ export class PerformanceController {
         where: { id: pid },
       } as any);
       if (!proj) throw new NotFoundException('Project not found');
+      // Explicit team match (per-hackathon memberships).
       const membership = await this.prisma.teamMember.findFirst({
-        where: { userId: req.user.id },
+        where: { userId: req.user.id, teamId: proj.teamId },
       } as any);
       if (
         req.user.role === 'PARTICIPANT' &&
-        (!membership || membership.teamId !== proj.teamId)
+        !membership
       )
         throw new ForbiddenException('IDOR prevented');
     }
@@ -532,6 +582,14 @@ export class PerformanceController {
       where: { id: dto.projectId },
     } as any);
     if (!project) throw new NotFoundException('Project not found');
+    // Authorization: own-team members or staff only (see phase-progress).
+    if (!['MENTOR', 'ORGANIZER', 'ADMIN'].includes(req.user.role)) {
+      const membership = await this.prisma.teamMember.findFirst({
+        where: { userId: req.user.id, teamId: project.teamId },
+      } as any);
+      if (!membership)
+        throw new ForbiddenException('Only team members can log improvement areas (IDOR prevented)');
+    }
     const imp = await this.prisma.improvementArea.create({
       data: {
         projectId: dto.projectId,
@@ -557,6 +615,17 @@ export class PerformanceController {
       } as any);
       if (!membership?.team?.project) return { improvementAreas: [] };
       pid = membership.team.project.id;
+    } else {
+      // IDOR check consistent with feedback/evaluations: explicit team match.
+      const proj = await this.prisma.project.findUnique({
+        where: { id: pid },
+      } as any);
+      if (!proj) throw new NotFoundException('Project not found');
+      const membership = await this.prisma.teamMember.findFirst({
+        where: { userId: req.user.id, teamId: proj.teamId },
+      } as any);
+      if (req.user.role === 'PARTICIPANT' && !membership)
+        throw new ForbiddenException('IDOR prevented');
     }
     const areas = await this.prisma.improvementArea.findMany({
       where: { projectId: pid, isPublished: true },
@@ -574,10 +643,11 @@ export class PerformanceController {
       where: { id: dto.projectId },
     } as any);
     if (!project) throw new NotFoundException('Project not found');
+    // Explicit team match (per-hackathon memberships).
     const membership = await this.prisma.teamMember.findFirst({
-      where: { userId: req.user.id },
+      where: { userId: req.user.id, teamId: project.teamId },
     } as any);
-    if (!membership || membership.teamId !== project.teamId)
+    if (!membership)
       throw new ForbiddenException(
         'Only team members can create insights (IDOR prevented)',
       );
@@ -593,14 +663,29 @@ export class PerformanceController {
   }
 
   @Get('history')
-  async getParticipantHistory(@Req() req: any) {
-    const membership = await this.prisma.teamMember.findFirst({
-      where: { userId: req.user.id },
-      include: { team: { include: { project: true } } },
-    } as any);
-    if (!membership?.team?.project)
-      return { history: null, message: 'No project' };
-    const projectId = membership.team.project.id;
+  async getParticipantHistory(@Req() req: any, @Query('projectId') projectId?: string) {
+    // Optional project scoping for multi-hackathon participants (additive).
+    let resolvedProjectId: string;
+    if (projectId) {
+      const proj = await this.prisma.project.findUnique({
+        where: { id: projectId },
+      } as any);
+      if (!proj) throw new NotFoundException('Project not found');
+      const membership = await this.prisma.teamMember.findFirst({
+        where: { userId: req.user.id, teamId: proj.teamId },
+      } as any);
+      if (req.user.role === 'PARTICIPANT' && !membership)
+        throw new ForbiddenException('IDOR prevented');
+      resolvedProjectId = projectId;
+    } else {
+      const membership = await this.prisma.teamMember.findFirst({
+        where: { userId: req.user.id },
+        include: { team: { include: { project: true } } },
+      } as any);
+      if (!membership?.team?.project)
+        return { history: null, message: 'No project' };
+      resolvedProjectId = membership.team.project.id;
+    }
     const [
       mistakes,
       feedbacks,
@@ -611,29 +696,29 @@ export class PerformanceController {
       insights,
     ] = await Promise.all([
       this.prisma.mistake.findMany({
-        where: { projectId, isPublished: true },
+        where: { projectId: resolvedProjectId, isPublished: true },
       } as any),
       this.prisma.mentorFeedback.findMany({
-        where: { projectId, isPublished: true },
+        where: { projectId: resolvedProjectId, isPublished: true },
       } as any),
       this.prisma.evaluation.findMany({
-        where: { projectId, isPublished: true },
+        where: { projectId: resolvedProjectId, isPublished: true },
       } as any),
       this.prisma.phaseProgress.findMany({
-        where: { projectId, isPublished: true },
+        where: { projectId: resolvedProjectId, isPublished: true },
       } as any),
       this.prisma.improvementArea.findMany({
-        where: { projectId, isPublished: true },
+        where: { projectId: resolvedProjectId, isPublished: true },
       } as any),
-      this.prisma.eliminationRecord.findUnique({ where: { projectId } } as any),
+      this.prisma.eliminationRecord.findUnique({ where: { projectId: resolvedProjectId } } as any),
       this.prisma.participantInsight.findMany({
-        where: { projectId, participantId: req.user.id },
+        where: { projectId: resolvedProjectId, participantId: req.user.id },
       } as any),
     ]);
     // Compute scores aggregated etc
     const scores = evaluations.map((e: any) => e.score);
     return {
-      projectId,
+      projectId: resolvedProjectId,
       mistakes,
       mentorFeedbacks: feedbacks,
       scores,
@@ -653,12 +738,13 @@ export class PerformanceController {
       where: { id: projectId },
     } as any);
     if (!proj) throw new NotFoundException('Project not found');
+    // Explicit team match (per-hackathon memberships).
     const membership = await this.prisma.teamMember.findFirst({
-      where: { userId: req.user.id },
+      where: { userId: req.user.id, teamId: proj.teamId },
     } as any);
     if (
       req.user.role === 'PARTICIPANT' &&
-      (!membership || membership.teamId !== proj.teamId)
+      !membership
     )
       throw new ForbiddenException('IDOR prevented');
     const [
@@ -699,7 +785,12 @@ export class PerformanceController {
 
   // ---------- Elimination (legacy) ----------
   @Post('elimination')
-  async ingestElimination(@Body() dto: IngestEliminationDto) {
+  async ingestElimination(@Req() req: any, @Body() dto: IngestEliminationDto) {
+    // Elimination ends a team's run: organizer/admin only. An open endpoint
+    // would let any participant eliminate rival projects.
+    if (!['ORGANIZER', 'ADMIN'].includes(req.user?.role)) {
+      throw new ForbiddenException('Only organizers can record eliminations');
+    }
     const elim = await this.prisma.eliminationRecord.upsert({
       where: { projectId: dto.projectId },
       update: {
@@ -728,18 +819,34 @@ export class PerformanceController {
   }
 
   @Get('elimination-analysis')
-  async getEliminationAnalysis(@Req() req: any) {
-    const membership = await this.prisma.teamMember.findFirst({
-      where: { userId: req.user.id },
-      include: { team: { include: { project: true } } },
-    } as any);
+  async getEliminationAnalysis(@Req() req: any, @Query('projectId') projectId?: string) {
+    // Optional project scoping for multi-hackathon participants (additive).
+    let resolvedProjectId: string;
+    if (projectId) {
+      const proj = await this.prisma.project.findUnique({
+        where: { id: projectId },
+      } as any);
+      if (!proj) throw new NotFoundException('Project not found');
+      const membership = await this.prisma.teamMember.findFirst({
+        where: { userId: req.user.id, teamId: proj.teamId },
+      } as any);
+      if (req.user.role === 'PARTICIPANT' && !membership)
+        throw new ForbiddenException('IDOR prevented');
+      resolvedProjectId = projectId;
+    } else {
+      const membership = await this.prisma.teamMember.findFirst({
+        where: { userId: req.user.id },
+        include: { team: { include: { project: true } } },
+      } as any);
 
-    if (!membership?.team?.project) {
-      return { status: 'NO_PROJECT' };
+      if (!membership?.team?.project) {
+        return { status: 'NO_PROJECT' };
+      }
+      resolvedProjectId = membership.team.project.id;
     }
 
     const record = await this.prisma.eliminationRecord.findUnique({
-      where: { projectId: membership.team.project.id },
+      where: { projectId: resolvedProjectId },
     } as any);
 
     if (!record) {

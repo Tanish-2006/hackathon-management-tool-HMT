@@ -9,6 +9,8 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
+    "dev:frontend": "pnpm --dir apps/participant-api/frontend run dev",
+    "dev:backend": "concurrently -k -n participant,organizer -c blue,green \"pnpm --dir apps/participant-api run dev\" \"pnpm --filter @hmt/organizer-api run dev\"",
     "build": "pnpm -r build",
     "build:apps": "pnpm --filter \"@hmt/*-api\" build",
     "build:packages": "pnpm --filter \"@hmt/*\" --filter \"!@hmt/*-api\" build",
@@ -28,6 +30,7 @@
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.19.0",
     "@typescript-eslint/parser": "^8.19.0",
+    "concurrently": "^9.2.0",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
     "prettier": "^3.4.2",

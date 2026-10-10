@@ -53,7 +53,35 @@ export function parseDurationToMs(value: unknown): number | null {
 }
 
 /**
- * Allocate `specs` proportionally across [windowStart, windowEnd].
+ * Phase duration weights for automatic allocation. Development always gets
+ * the largest share; registration/submission/finale are short windows.
+ * Keys are normalized phase names (lowercase, no spaces/underscores).
+ * Unknown/custom phases fall back to DEFAULT_WEIGHT.
+ */
+const PHASE_DURATION_WEIGHTS: Record<string, number> = {
+  registration: 1,
+  teamformation: 1,
+  ideation: 1.5,
+  development: 5,
+  submission: 0.75,
+  evaluation: 1.5,
+  finale: 0.75,
+  results: 0.5,
+};
+const DEFAULT_PHASE_WEIGHT = 1;
+// Minimum useful allocation per phase (1 hour). Enforced only when the
+// window is large enough to give every phase the minimum; tiny windows
+// fall back to pure proportional shares (still start < end in ms).
+const MIN_PHASE_MS = 3600000;
+
+function weightForPhase(name: string): number {
+  const key = name.toLowerCase().replace(/[\s_]+/g, '');
+  return PHASE_DURATION_WEIGHTS[key] ?? DEFAULT_PHASE_WEIGHT;
+}
+
+/**
+ * Allocate `specs` across [windowStart, windowEnd] using phase-specific
+ * duration weights (development largest), at millisecond precision.
  * Phase boundaries touch exactly (end[i] === start[i+1]); touching is NOT
  * an overlap under the canonical rule, so the result always validates.
  */
@@ -82,11 +110,50 @@ export function normalizeTimeline(
     seen.add(s.order);
   }
   const total = end - start;
-  const slice = total / ordered.length;
+  if (total < ordered.length) {
+    throw new Error(
+      `Event window too small for ${ordered.length} phases (needs at least ${ordered.length}ms so every phase has start < end)`,
+    );
+  }
+  const weights = ordered.map((s) => weightForPhase(s.name));
+  const weightSum = weights.reduce((a, b) => a + b, 0);
+  // Raw proportional shares in ms.
+  let shares = weights.map((w) => (total * w) / weightSum);
+  // Enforce a minimum useful duration per phase when the window allows it,
+  // taking the deficit from phases above the minimum, proportionally.
+  if (total >= ordered.length * MIN_PHASE_MS) {
+    let deficit = 0;
+    const fixed = shares.map((share) => {
+      if (share < MIN_PHASE_MS) {
+        deficit += MIN_PHASE_MS - share;
+        return MIN_PHASE_MS;
+      }
+      return share;
+    });
+    if (deficit > 0) {
+      const surplusTotal = fixed.reduce((a, share) => a + Math.max(0, share - MIN_PHASE_MS), 0);
+      if (surplusTotal > 0) {
+        const take = Math.min(deficit, surplusTotal);
+        shares = fixed.map((share) =>
+          share <= MIN_PHASE_MS ? share : share - (take * (share - MIN_PHASE_MS)) / surplusTotal,
+        );
+      } else {
+        shares = fixed;
+      }
+    } else {
+      shares = fixed;
+    }
+  }
+  // Chain boundaries so edges always touch exactly (end[i] === start[i+1]);
+  // touching is NOT an overlap under the canonical rule. Millisecond
+  // precision throughout — no date-only truncation, so short phases never
+  // collapse to zero duration. The last phase ends exactly on the window end.
+  let boundary = start;
   return ordered.map((s, i) => {
-    const sMs = Math.round(start + i * slice);
-    // Last phase ends exactly on the window end (absorbs rounding).
-    const eMs = i === ordered.length - 1 ? end : Math.round(start + (i + 1) * slice);
+    const sMs = i === 0 ? start : boundary;
+    let eMs = i === ordered.length - 1 ? end : Math.round(sMs + Math.max(1, shares[i]));
+    if (eMs <= sMs) eMs = sMs + 1; // degenerate guard (unreachable after the size check above)
+    boundary = eMs;
     return {
       name: s.name,
       order: s.order,

@@ -20,7 +20,9 @@ export class AnalyticsService {
     const assignments = Array.from(memoryStore.mentorAssignments.values()).filter((a) => a.hackathonId === hackathonId);
     const submitted = projects.filter((p) => (p as any).status === 'SUBMITTED' || (p as any).demoUrl || (p as any).repoUrl).length;
     const notSubmitted = teams.length - submitted;
-    const submissionRate = teams.length === 0 ? 0 : submitted / teams.length;
+    // Clamp: submitted counts projects while denominator counts teams — a team
+    // with multiple projects could otherwise push the rate above 1.
+    const submissionRate = teams.length === 0 ? 0 : Math.min(submitted / teams.length, 1);
     const published = feedbacks.filter((f) => f.publicationStatus === 'PUBLISHED').length;
     const pendingReview = feedbacks.filter((f) => f.publicationStatus === 'MENTOR_SUBMITTED').length;
     const unpublished = feedbacks.filter((f) => f.publicationStatus !== 'PUBLISHED').length;

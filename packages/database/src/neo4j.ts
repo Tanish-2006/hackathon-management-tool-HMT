@@ -30,13 +30,27 @@ export async function checkNeo4jHealth(
   const d = driverInstance ?? getNeo4jDriver(config);
   const start = Date.now();
   const session = d.session({ database: config.database ?? 'neo4j' });
+  let timer: NodeJS.Timeout | undefined;
   try {
-    await session.run('RETURN 1 AS ok');
+    const run = session.run('RETURN 1 AS ok');
+    // Bound the health probe to 2s; the driver itself keeps its normal
+    // acquisition timeout so regular queries are unaffected.
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Neo4j health check timed out after 2000ms')), 2000);
+    });
+    timeout.catch(() => {});
+    await Promise.race([run, timeout]);
     return { ok: true, latencyMs: Date.now() - start };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    return { ok: false, latencyMs: Date.now() - start, error: e instanceof Error ? e.message : String(e) };
   } finally {
-    await session.close();
+    if (timer) clearTimeout(timer);
+    // session.close() must never mask the original health error.
+    try {
+      await session.close();
+    } catch {
+      // ignore close errors — health result already determined
+    }
   }
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateEnv, loadBaseEnv } from './env';
+import { validateEnv, loadBaseEnv, resolveSyncSecret, isDevSyncSecret, DEV_SYNC_SECRET } from './env';
 import { z } from 'zod';
 
 describe('config - env validation', () => {
@@ -29,5 +29,20 @@ describe('config - env validation', () => {
     const parsed = loadBaseEnv(env);
     expect(parsed.DATABASE_URL).toContain('postgresql');
     expect(parsed.NODE_ENV).toBe('test');
+  });
+
+  it('resolveSyncSecret prefers explicit config, dev-defaults outside production, fail-closed in prod', () => {
+    expect(resolveSyncSecret({ SYNC_SHARED_SECRET: 's3cret-value', NODE_ENV: 'development' } as any)).toBe(
+      's3cret-value',
+    );
+    expect(resolveSyncSecret({ SYNC_SHARED_SECRET: 's3cret-value', NODE_ENV: 'production' } as any)).toBe(
+      's3cret-value',
+    );
+    expect(resolveSyncSecret({ NODE_ENV: 'development' } as any)).toBe(DEV_SYNC_SECRET);
+    expect(resolveSyncSecret({ NODE_ENV: 'test' } as any)).toBe(DEV_SYNC_SECRET);
+    expect(resolveSyncSecret({ SYNC_SHARED_SECRET: '', NODE_ENV: 'production' } as any)).toBe('');
+    expect(isDevSyncSecret({ NODE_ENV: 'development' } as any)).toBe(true);
+    expect(isDevSyncSecret({ SYNC_SHARED_SECRET: 's3cret-value', NODE_ENV: 'development' } as any)).toBe(false);
+    expect(isDevSyncSecret({ NODE_ENV: 'production' } as any)).toBe(false);
   });
 });

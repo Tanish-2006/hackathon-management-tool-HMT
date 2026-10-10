@@ -307,6 +307,8 @@ export interface HackathonPublishedEvent {
     category?: string | null;
     tags?: string[];
     organizerName?: string | null;
+    // Matches contracts HackathonPublished payload (optional, default OPTIONAL).
+    repoRequirement?: 'REQUIRED' | 'OPTIONAL' | 'DISABLED';
   };
 }
 

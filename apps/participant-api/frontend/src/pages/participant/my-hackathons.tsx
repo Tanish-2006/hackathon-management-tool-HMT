@@ -24,12 +24,19 @@ export default function MyHackathons(){
       const res = await hmtBackendService.getMyHackathons(b==='all'?undefined:b);
       setRows(res.data ?? []);
       // AI availability per live hackathon (backend-derived, not hardcoded).
-      const next: Record<string,any> = {};
-      for(const r of (res.data ?? [])){
-        if(r.bucket==='live'){
-          try{ next[r.id] = await hmtBackendService.getAiAccessStatus(); }catch{ next[r.id]=null; }
-        }
-      }
+      // Scoped by hackathon so one workspace never reports another's status.
+      // Fetched in parallel — the previous sequential loop stalled the grid.
+      const live = (res.data ?? []).filter((r: any) => r.bucket === 'live');
+      const settled = await Promise.all(
+        live.map((r: any) =>
+          hmtBackendService.getAiAccessStatus(undefined, r.id).then(
+            (v) => [r.id, v] as const,
+            () => [r.id, null] as const,
+          ),
+        ),
+      );
+      const next: Record<string, any> = {};
+      for (const [id, v] of settled) next[id] = v;
       setAi(next);
     }catch(e){ setError(e instanceof ApiError?e.message:(e as Error)?.message||'Failed'); }
     finally{ setLoading(false); }
@@ -66,7 +73,7 @@ export default function MyHackathons(){
                   <div className="flex items-center gap-2 font-bold"><Sparkles size={13} className="text-[#d8e35b]"/> AI Teammate: {ai[r.id]?.allowed?'AVAILABLE':'LOCKED'}</div>
                   <div className="mt-1 text-[#9b9fb1]">{ai[r.id]?.allowed?'Ask project questions — hints only, targeted retrieval.':'Locked outside live window (backend enforced).'}</div>
                   <div className="mt-2 flex gap-2">
-                    <Link href="/participant/ai" className="rounded-lg bg-[#d8e35b] px-3 py-1.5 font-bold text-[#171a2d]">Open AI</Link>
+                    <Link href={`/participant/my-hackathons/${r.id}/ai`} className="rounded-lg bg-[#d8e35b] px-3 py-1.5 font-bold text-[#171a2d]">Open AI</Link>
                     <Link href="/participant/projects" className="rounded-lg border border-[#3a3e5a] px-3 py-1.5">Project</Link>
                   </div>
                 </div>

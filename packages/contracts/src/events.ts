@@ -92,6 +92,10 @@ export const hackathonPublishedSchema = baseEventSchema.extend({
     tags: z.array(z.string()).optional(),
     organizerName: z.string().optional(),
     hackathonVersion: z.number().int().optional(),
+    // GitHub repository requirement for team projects (organizer wizard
+    // Step 8 participation config). Optional for v1 backward-compat;
+    // absent means OPTIONAL. Metadata only — never an access grant.
+    repoRequirement: z.enum(['REQUIRED', 'OPTIONAL', 'DISABLED']).optional(),
   }),
 });
 

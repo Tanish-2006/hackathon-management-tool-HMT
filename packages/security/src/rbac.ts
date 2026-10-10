@@ -87,5 +87,7 @@ export const PERMISSIONS = {
 } as const;
 
 export function hasPermission(userRole: Role, allowed: readonly Role[]): boolean {
+  if (!Array.isArray(allowed)) return false;
+  if (typeof userRole !== 'string' || userRole.length === 0) return false;
   return (allowed as readonly string[]).includes(userRole);
 }

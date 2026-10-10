@@ -13,11 +13,19 @@ export async function auditRoutes(app: FastifyInstance, opts: { jwtConfig: JwtCo
       return reply.status(403).send({ error: { code: 'FORBIDDEN', message: 'Only organizers can view audit logs' } });
     }
     const query: any = req.query ?? {};
+    const rawLimit = query.limit;
+    // Guard NaN/negative/float/unbounded: Number("abc") is NaN (falsy → would
+    // return all rows), Number(0) is falsy, negatives slice from the end.
+    const parsedLimit = rawLimit === undefined ? 100 : Number(rawLimit);
+    const limit =
+      Number.isFinite(parsedLimit) && parsedLimit > 0
+        ? Math.min(Math.floor(parsedLimit), 500)
+        : 100;
     const logs = await auditService.findMany({
       actorId: query.actorId,
       action: query.action,
       resourceType: query.resourceType,
-      limit: query.limit ? Number(query.limit) : 100,
+      limit,
     });
     return reply.send({ data: logs });
   });

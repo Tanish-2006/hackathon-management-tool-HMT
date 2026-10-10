@@ -18,6 +18,14 @@ export class AIChatDto {
   @IsString()
   @IsOptional()
   projectId?: string;
+
+  @ApiPropertyOptional({
+    example: 'hack_123',
+    description: 'Hackathon scope — verified against team/project membership, never trusted alone',
+  })
+  @IsString()
+  @IsOptional()
+  hackathonId?: string;
 }
 
 export class CreateConversationDto {
@@ -31,6 +39,14 @@ export class CreateConversationDto {
   @IsOptional()
   projectId?: string;
 
+  @ApiPropertyOptional({
+    example: 'hack_123',
+    description: 'Hackathon scope — verified against team/project membership, never trusted alone',
+  })
+  @IsString()
+  @IsOptional()
+  hackathonId?: string;
+
   @ApiProperty({ example: 'Hello AI, help us win' })
   @IsString()
   initialMessage: string;
@@ -40,6 +56,14 @@ export class CreateAnalysisJobDto {
   @ApiProperty({ example: 'proj_123' })
   @IsString()
   projectId: string;
+
+  @ApiPropertyOptional({
+    example: 'hack_123',
+    description: 'Hackathon scope — verified against team/project membership, never trusted alone',
+  })
+  @IsString()
+  @IsOptional()
+  hackathonId?: string;
 
   @ApiPropertyOptional({ example: 'REPOSITORY_ANALYSIS' })
   @IsString()

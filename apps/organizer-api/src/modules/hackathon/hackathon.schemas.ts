@@ -142,6 +142,9 @@ export const updateSchema = z.object({
       eligibility: z.array(z.enum(['Students', 'Developers', 'Designers', 'Professionals', 'Anyone'])).max(12).optional(),
       approval: z.enum(['AUTOMATIC', 'ORGANIZER_APPROVAL']).optional(),
       participantLimit: z.number().int().min(1).nullable().optional(),
+      // GitHub repository requirement per team/project (wizard Step 8).
+      // Absent on old records → OPTIONAL (safe default, never breaks).
+      repoRequirement: z.enum(['REQUIRED', 'OPTIONAL', 'DISABLED']).optional(),
       submission: z
         .object({
           required: z.array(z.enum(['TITLE', 'DESCRIPTION', 'REPO', 'DEMO_URL', 'VIDEO', 'PRESENTATION', 'DOCS'])).optional(),

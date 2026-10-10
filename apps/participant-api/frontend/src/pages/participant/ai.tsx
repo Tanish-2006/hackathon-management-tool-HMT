@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sparkles, Send, History, FileText, ShieldAlert, CheckCircle2, Loader2, AlertCircle, X, ChevronRight, Layers, Eye, Lock, Unlock, Brain, BookOpen, MessageSquare, Trash2 } from 'lucide-react';
 import { hmtBackendService, ApiError } from '@/services/backendApi';
+import { useHackathonContext } from '@/hooks/use-hackathon-context';
 
 function friendly(e:unknown){ return e instanceof ApiError? e.message : (e as Error)?.message || 'Failed' }
 
-export default function ParticipantAI(){
+export default function ParticipantAI({ hackathonId }: { hackathonId?: string }){
   const [conversations,setConversations]=useState<any[]>([]);
   const [activeId,setActiveId]=useState<string|null>(null);
   const [messages,setMessages]=useState<any[]>([]);
@@ -25,42 +26,63 @@ export default function ParticipantAI(){
   const [showAnalysis,setShowAnalysis]=useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
+  // Hackathon-scoped context. Inside a hackathon workspace the route supplies
+  // hackathonId as the authority (never the global selector) so switching
+  // hackathons can never carry over the previous team/project/history.
+  // Standalone use (legacy) falls back to the shared persisted selection.
+  const ctx = useHackathonContext();
+  const scoped = !!hackathonId;
+  const contextId = scoped ? String(hackathonId) : ctx.selectedId;
+
   useEffect(()=>{ endRef.current?.scrollIntoView({ behavior:'smooth' }); },[messages]);
 
   useEffect(()=>{
+    // Switching hackathons must never show the previous workspace's team,
+    // project, grant, history, or retrieval preview.
+    setProject(null); setTeam(null); setGrant(null); setAiAccess(null);
+    setConversations([]); setActiveId(null); setMessages([]);
+    setReadme(null); setRelevant([]); setScope('TARGETED'); setError(null);
+    if(!scoped && (ctx.loading || !contextId)) { setLoading(!ctx.loading); return; }
+    if(scoped && !contextId) { setLoading(false); return; }
     let m=true;
     async function load(){
       setLoading(true); setError(null);
       try{
-        const [h, p, t, convs] = await Promise.allSettled([
-          hmtBackendService.getCurrentHackathon(),
-          hmtBackendService.getMyProject(),
-          hmtBackendService.getMyTeam(),
-          hmtBackendService.getAIConversations(),
+        const [h, p, t] = await Promise.allSettled([
+          (!scoped && ctx.selectedHackathon) ? Promise.resolve(ctx.selectedHackathon) : hmtBackendService.getHackathonById(contextId),
+          hmtBackendService.getMyProject(contextId),
+          hmtBackendService.getMyTeam(contextId),
         ]);
         if(!m) return;
+        let proj: any = null;
         if(h.status==='fulfilled') setHackathon(h.value as any);
         if(p.status==='fulfilled'){
-          const proj = (p.value as any)?.project ?? p.value;
+          proj = (p.value as any)?.project ?? p.value;
           if(proj?.id){ setProject(proj);
-            try{ const st = await hmtBackendService.checkRepositoryAccess(proj.id); setGrant(st as any);
+            try{ const st = await hmtBackendService.checkRepositoryAccess(proj.id); if(m) setGrant(st as any);
               // fetch a chat without grant to capture retrieval preview if any?
             }catch{}
           }
         }
-        if(t.status==='fulfilled'){ const tm=(t.value as any)?.team ?? t.value; if(tm?.id) setTeam(tm); else if((t.value as any)?.id) setTeam(t.value); }
-        try{ const acc = await hmtBackendService.getAiAccessStatus((p.status==='fulfilled'?((p.value as any)?.project ?? p.value)?.id:undefined) ?? undefined); if(m) setAiAccess(acc); }catch{ /* locked */ }
-        if(convs.status==='fulfilled'){
-          const c:any = convs.value;
-          const arr = Array.isArray(c)?c: c?.conversations || c?.data || []
-          setConversations(arr);
-          if(arr[0]?.id) setActiveId(arr[0].id);
-        }
+        if(t.status==='fulfilled'){ const tm=(t.value as any)?.team ?? t.value; if(tm?.id && (!tm.hackathonId || String(tm.hackathonId)===String(contextId))) setTeam(tm); else if((t.value as any)?.id && (!(t.value as any)?.hackathonId || String((t.value as any).hackathonId)===String(contextId))) setTeam(t.value); }
+        try{ const acc = await hmtBackendService.getAiAccessStatus(proj?.id ?? undefined, contextId ?? undefined); if(m) setAiAccess(acc); }catch{ /* locked */ }
+        // History is scoped to this hackathon's project: without a project,
+        // the workspace shows no conversations (never another team's).
+        try{
+          const c:any = proj?.id
+            ? await hmtBackendService.getAIConversations(proj.id, contextId ?? undefined)
+            : await hmtBackendService.getAIConversations(undefined, contextId ?? undefined);
+          if(!m) return;
+          const arr = Array.isArray(c)?c: c?.conversations || c?.data || [];
+          const filtered = proj?.id ? arr.filter((x:any)=> !x.projectId || String(x.projectId)===String(proj.id)) : [];
+          setConversations(filtered);
+          if(filtered[0]?.id) setActiveId(filtered[0].id);
+        }catch{ if(m) setConversations([]); }
       }catch(e){ if(m) setError(friendly(e)); }
       finally{ if(m) setLoading(false); }
     }
     load(); return ()=>{m=false}
-  },[]);
+  },[ctx.loading, contextId, scoped]);
 
   useEffect(()=>{
     if(!activeId) { setMessages([]); return; }
@@ -84,7 +106,7 @@ export default function ParticipantAI(){
     setInput('');
     try{
       if(activeId){
-        const res:any = await hmtBackendService.postAIConversationMessage(activeId, trimmed, project?.id);
+        const res:any = await hmtBackendService.postAIConversationMessage(activeId, trimmed, project?.id, contextId ?? undefined);
         // res may contain answer + recommendations + hadRepositoryAccess
         const assistant = { role:'ASSISTANT', content: res?.answer || res?.content || 'Hint received.', createdAt: new Date().toISOString(), meta: res };
         setMessages(prev=>[...prev, assistant]);
@@ -94,7 +116,7 @@ export default function ParticipantAI(){
         if(res?.readmeContext) setReadme(res.readmeContext);
       } else {
         // create conversation first
-        const created:any = await hmtBackendService.createAIConversation({ title: trimmed.slice(0,40), initialMessage: trimmed, projectId: project?.id });
+        const created:any = await hmtBackendService.createAIConversation({ title: trimmed.slice(0,40), initialMessage: trimmed, projectId: project?.id, hackathonId: contextId ?? undefined });
         const conv = created?.conversation || created;
         const msgs = created?.messages || [];
         setConversations(prev=> [conv, ...prev]);
@@ -103,7 +125,7 @@ export default function ParticipantAI(){
         if(created?.aiContext) setScope(created.aiContext.hadRepositoryAccess ? 'GRANTED' : 'NO GRANT');
         // if created doesn't have messages, fallback to ask
         if(msgs.length===0){
-          const res:any = await hmtBackendService.askAITeammate(trimmed, { projectId: project?.id });
+          const res:any = await hmtBackendService.askAITeammate(trimmed, { projectId: project?.id, hackathonId: contextId ?? undefined });
           setMessages([{ role:'USER', content: trimmed } as any, { role:'ASSISTANT', content: res?.answer || 'Hint received.', meta: res } as any]);
         }
       }
@@ -144,6 +166,62 @@ export default function ParticipantAI(){
 
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex gap-2"><AlertCircle size={16}/>{error}<button onClick={()=>setError(null)} className="ml-auto"><X size={14}/></button></div>}
       {success && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 flex gap-2"><CheckCircle2 size={16}/>{success}<button onClick={()=>setSuccess(null)} className="ml-auto"><X size={14}/></button></div>}
+
+      {/* Hackathon context: AI answers are scoped to one hackathon's project */}
+      <div className="rounded-xl border border-[#dedbd1] bg-[#f4f1e8] px-4 py-2.5 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        {scoped ? (
+          <>
+            <span className="text-xs text-[#55586a]">
+              <a href="/participant/my-hackathons" className="font-bold underline">My Hackathons</a>
+              <span className="mx-1.5 text-[#aaa9a2]">/</span>
+              <span className="font-bold text-[#171a2d]">{hackathon?.title || 'Hackathon workspace'}</span>
+              <span className="mx-1.5 text-[#aaa9a2]">/</span>
+              <span>AI Teammate</span>
+              <span className="ml-2 text-[#77798a]">· {team?.name || 'No team yet'} · {project?.title ? String(project.title).slice(0,32) : 'No project yet'}</span>
+            </span>
+            <a href="/participant/my-hackathons" className="text-xs font-bold text-[#171a2d] underline">Switch hackathon</a>
+          </>
+        ) : ctx.loading ? (
+          <span className="text-xs text-[#77798a]">Loading hackathon context…</span>
+        ) : !contextId ? (
+          <span className="text-xs text-[#55586a]">No hackathon context — <a href="/participant/hackathons" className="font-bold underline">register in Discover</a> to scope AI to your project.</span>
+        ) : (
+          <>
+            <label className="flex items-center gap-2 text-xs font-semibold text-[#55586a]">Hackathon
+              <select
+                value={contextId}
+                onChange={e=>ctx.select(e.target.value || null)}
+                className="rounded-lg border border-[#dedbd1] bg-white px-2 py-1.5 text-xs font-bold text-[#171a2d] outline-none"
+                aria-label="Select hackathon context"
+              >
+                {ctx.options.map(o=><option key={o.id} value={o.id}>{o.title}{o.registered?'':' (not registered)'}</option>)}
+              </select>
+            </label>
+            {!ctx.selectedIsRegistered && (
+              <span className="text-xs text-[#55586a]">Not registered here — grant-gated analysis unlocks after registration.</span>
+            )}
+          </>
+        )}
+      </div>
+
+      {scoped && !loading && !hackathon && (
+        <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-4 text-sm text-[#55586a]">
+          <b className="text-[#171a2d]">Not registered for this hackathon.</b>
+          <p className="mt-1 leading-5">AI Teammate lives inside a registered hackathon workspace. <a href="/participant/hackathons" className="font-bold underline">Discover hackathons</a> to register, or <a href="/participant/my-hackathons" className="font-bold underline">open My Hackathons</a>.</p>
+        </div>
+      )}
+      {scoped && !loading && hackathon && !team?.id && (
+        <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-4 text-sm text-[#55586a]">
+          <b className="text-[#171a2d]">Join a team first.</b>
+          <p className="mt-1 leading-5">AI Teammate needs your team context for {hackathon?.title || 'this hackathon'}. <a href="/participant/teams" className="font-bold underline">Create or join a team</a>, then return here.</p>
+        </div>
+      )}
+      {scoped && !loading && team?.id && !project?.id && (
+        <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-4 text-sm text-[#55586a]">
+          <b className="text-[#171a2d]">No project yet for {team?.name || 'your team'}.</b>
+          <p className="mt-1 leading-5">Create the team project to scope AI answers. <a href="/participant/projects" className="font-bold underline">Open My Project</a>.</p>
+        </div>
+      )}
 
       {aiAccess && !aiAccess.allowed && (
         <div className="rounded-2xl border border-[#171a2d] bg-[#171a2d] p-4 flex gap-3 text-[#fdfbf5]">

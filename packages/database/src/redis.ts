@@ -37,11 +37,13 @@ export async function checkRedisHealth(
   const start = Date.now();
   try {
     // With enableOfflineQueue:false, commands issued while the socket is still
-    // connecting fail with "Stream isn't writeable". Wait for ready first.
+    // connecting fail with "Stream isn't writeable". Wait for ready first (bounded).
     const status = (c as unknown as { status?: string }).status;
     if (status && status !== 'ready') {
       await new Promise<void>((resolve) => {
+        let timer: NodeJS.Timeout | undefined;
         const done = () => {
+          if (timer) clearTimeout(timer);
           c.removeListener('ready', onReady);
           c.removeListener('error', onError);
           resolve();
@@ -50,14 +52,26 @@ export async function checkRedisHealth(
         const onError = () => done();
         c.once('ready', onReady);
         c.once('error', onError);
-        setTimeout(done, 1500);
+        timer = setTimeout(done, 1500);
       });
     }
-    const pong = await c.ping();
+    // 2s deadline so a partitioned Redis cannot hang readiness.
+    const pingP = c.ping();
+    let pingTimer: NodeJS.Timeout | undefined;
+    const timeoutP = new Promise<never>((_, reject) => {
+      pingTimer = setTimeout(() => reject(new Error('Redis ping timed out after 2000ms')), 2000);
+    });
+    timeoutP.catch(() => {});
+    let pong: string;
+    try {
+      pong = await Promise.race([pingP, timeoutP]);
+    } finally {
+      if (pingTimer) clearTimeout(pingTimer);
+    }
     if (pong !== 'PONG') throw new Error(`Unexpected PING response: ${pong}`);
     return { ok: true, latencyMs: Date.now() - start };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    return { ok: false, latencyMs: Date.now() - start, error: e instanceof Error ? e.message : String(e) };
   }
 }
 
@@ -74,12 +88,27 @@ export async function disconnectRedis(): Promise<void> {
 // - Refresh token reuse detection: hmt:auth:revoked:<jti> TTL=refreshTtlSec
 // - Queues (BullMQ future): hmt:queue:<name>
 // - Temp state: hmt:tmp:<id> TTL short
+// NOTE: helpers below return the suffix WITHOUT the `hmt:` prefix — ioredis
+// `keyPrefix: 'hmt:'` adds it automatically. Never prepend `hmt:` manually
+// (would produce `hmt:hmt:…`) and never concatenate raw user input without
+// sanitizing (see sanitizeKeyPart).
+
+function sanitizeKeyPart(part: string): string {
+  if (typeof part !== 'string' || part.length === 0) throw new Error('Invalid Redis key part: empty');
+  // Disallow glob/whitespace/colon ambiguity that breaks SCAN patterns and
+  // makes `rl:::1:…` (IPv6) ambiguous. IPv6 is encoded by replacing `:`.
+  if (/[\s*?[\]\\]/.test(part)) throw new Error('Invalid Redis key part: whitespace or glob chars');
+  return part.replace(/:/g, '_');
+}
 
 export const REDIS_KEYS = {
-  cache: (domain: string, id: string) => `cache:${domain}:${id}`,
-  rateLimit: (key: string) => `rl:${key}`,
-  revokedJti: (jti: string) => `auth:revoked:${jti}`,
-  session: (sessionId: string) => `auth:session:${sessionId}`,
-  oauthState: (state: string) => `oauth:github:state:${state}`,
-  installState: (state: string) => `oauth:github:install:${state}`,
+  cache: (domain: string, id: string) => `cache:${sanitizeKeyPart(domain)}:${sanitizeKeyPart(id)}`,
+  rateLimit: (key: string) => `rl:${sanitizeKeyPart(key)}`,
+  revokedJti: (jti: string) => {
+    if (typeof jti !== 'string' || jti.length === 0) throw new Error('Invalid jti');
+    return `auth:revoked:${sanitizeKeyPart(jti)}`;
+  },
+  session: (sessionId: string) => `auth:session:${sanitizeKeyPart(sessionId)}`,
+  oauthState: (state: string) => `oauth:github:state:${sanitizeKeyPart(state)}`,
+  installState: (state: string) => `oauth:github:install:${sanitizeKeyPart(state)}`,
 } as const;

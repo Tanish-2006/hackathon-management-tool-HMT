@@ -2,16 +2,40 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'wouter';
 import { ArrowRight, Calendar, Search, Loader2, AlertCircle, ShieldCheck, Megaphone, Clock3, Users, Trophy } from 'lucide-react';
 import { hmtBackendService, ApiError } from '@/services/backendApi';
+import RegistrationForm from '@/pages/participant/registration-form';
 import { cn } from '@/lib/utils';
 
 function friendly(e:unknown){ return e instanceof ApiError ? e.message : (e as Error)?.message || 'Failed' }
+
+// Date + time for phase ranges (hour/minute precision — date-only hides
+// zero-duration/ordering problems the backend now guarantees against).
+function fmtDT(v: unknown){
+  if(!v) return '—';
+  const t = new Date(v as string);
+  if(Number.isNaN(t.getTime())) return '—';
+  return t.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
 
 function Badge({ children, tone='muted' }: any){
   const m:any={ lime:'bg-[#d8e35b] text-[#171a2d]', coral:'bg-[#f26a4f] text-white', blue:'bg-[#5aafbd] text-white', dark:'bg-[#171a2d] text-white', muted:'bg-[#e9e5da] text-[#77798a]' }
   return <span className={cn("rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider", m[tone]||m.muted)}>{children}</span>
 }
 
-const TABS = ['Overview','Challenge','Eligibility','Timeline','Rules','Resources','Prizes','Judging','FAQs','Register'] as const;
+const TABS = ['Overview','Challenge','Eligibility','Timeline','Rules','Resources','Prizes','Judging','FAQs'] as const;
+
+// Registration-closure display state (informational only — the backend
+// enforces the lock on every mutation using server time).
+function lockInfo(h: any): { locked: boolean; reason: string | null } {
+  if (!h) return { locked: false, reason: null };
+  if ((h.status ?? 'PUBLISHED') === 'ARCHIVED') {
+    return { locked: true, reason: 'This hackathon is archived — team changes are locked.' };
+  }
+  const t = h.registrationEnd ? new Date(h.registrationEnd).getTime() : null;
+  if (t !== null && !Number.isNaN(t) && Date.now() > t) {
+    return { locked: true, reason: 'Registration is closed — team creation and joining are locked.' };
+  }
+  return { locked: false, reason: null };
+}
 
 export default function ParticipantHackathons(){
   const [rows,setRows]=useState<any[]>([]);
@@ -28,22 +52,47 @@ export default function ParticipantHackathons(){
   const [detailError,setDetailError]=useState<string|null>(null);
   const [tab,setTab]=useState<typeof TABS[number]>('Overview');
   const [registerMsg,setRegisterMsg]=useState<string|null>(null);
-  const [registering,setRegistering]=useState(false);
+  const [registeredIds,setRegisteredIds]=useState<Set<string>>(new Set());
+  const [pulled,setPulled]=useState(false);
+  const [syncing,setSyncing]=useState(false);
+  const [syncMsg,setSyncMsg]=useState<string|null>(null);
 
   async function load(){
     setLoading(true); setError(null);
     try{
-      const res = await hmtBackendService.listHackathons({
+      const params = {
         ...(search.trim()?{search:search.trim()}:{}),
         ...(status?{status}:{}),
         ...(mode?{mode}:{}),
         ...(registration?{registration}:{}),
         pageSize: 30,
-      });
-      const data = Array.isArray(res) ? res : (res.data ?? []);
+      };
+      const res = await hmtBackendService.listHackathons(params);
+      let data = Array.isArray(res) ? res : (res.data ?? []);
+      let total = res.pagination?.total ?? data.length;
+      // Self-healing sync: an empty published list usually means the organizer
+      // publish event never reached this read-model (push is best-effort).
+      // Pull the organizer outbox once per page load (server defaults,
+      // idempotent by eventId) and re-read with the SAME filters — never
+      // fabricates records. Fires even with search/filters active, because a
+      // typed-but-unmatched query is exactly the reported symptom.
+      if(!data.length && !pulled){
+        try{
+          await hmtBackendService.pullSync();
+          const retry = await hmtBackendService.listHackathons(params);
+          data = Array.isArray(retry) ? retry : (retry.data ?? []);
+          total = (retry as any)?.pagination?.total ?? data.length;
+        }catch{ /* keep honest empty state on failure */ }
+        setPulled(true);
+      }
       setRows(data);
-      setTotal(res.pagination?.total ?? data.length);
+      setTotal(total);
       if(data.length && !selectedId) setSelectedId(data[0].id);
+      // Registration state drives Register vs Registered CTA (real backend state).
+      hmtBackendService.getMyRegistrations().then((regs:any)=>{
+        const list = Array.isArray(regs)?regs:(regs?.data??[]);
+        setRegisteredIds(new Set(list.map((r:any)=>String(r.hackathonId))));
+      }).catch(()=>null);
     }catch(e){ setError(friendly(e)); }
     finally{ setLoading(false); }
   }
@@ -66,20 +115,43 @@ export default function ParticipantHackathons(){
   const resources = selected?.resources ?? [];
   const anns = selected?.announcements ?? [];
 
-  async function register(){
-    if(!selected) return;
-    setRegistering(true); setRegisterMsg(null);
+  // Panel state from live backend data (refreshed, never assumed):
+  // A unregistered, B registered-no-team, C in team, D locked.
+  const isRegistered = !!selected && registeredIds.has(String(selected.id));
+  const lock = lockInfo(selected);
+  const [myTeamSelected,setMyTeamSelected]=useState<any|null>(null);
+  async function refreshSelectedTeam(){
+    if(!selected) { setMyTeamSelected(null); return; }
     try{
-      await hmtBackendService.registerForHackathon(selected.id, { teamChoice: 'later' });
-      setRegisterMsg('Registered — see My Hackathons for next steps (team choice).');
-    }catch(e:any){
-      const msg = friendly(e);
-      // Skill-profile gate → direct to profile, never duplicate the form here.
-      setRegisterMsg(msg.includes('skill profile') ? 'Complete your skill profile first — then register. Your profile is reused for eligibility + team matching.' : msg);
-    }finally{ setRegistering(false); }
+      const t = await hmtBackendService.getMyTeam(selected.id);
+      const team = (t as any)?.team ?? t;
+      setMyTeamSelected(team && team.id ? team : null);
+    }catch{ setMyTeamSelected(null); }
   }
+  useEffect(()=>{
+    if(isRegistered && selected) refreshSelectedTeam();
+    else setMyTeamSelected(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[selected?.id, registeredIds]);
 
   const filteredHint = useMemo(()=> `${total} published hackathon${total===1?'':'s'}`,[total]);
+
+  // Manual recovery: re-pull the organizer outbox on demand (idempotent,
+  // server defaults). Lets a published hackathon appear without recreating it.
+  async function syncNow(){
+    setSyncing(true); setSyncMsg(null);
+    try{
+      const r: any = await hmtBackendService.pullSync();
+      const results = r?.results ?? [];
+      const ok = results.filter((x:any)=>x?.ok).length;
+      await load();
+      setSyncMsg(ok ? `Synced ${ok} published update${ok===1?'':'s'} from the organizer.` : 'Sync finished — no new published updates found.');
+    }catch(e:any){
+      setSyncMsg(friendly(e));
+    }finally{
+      setSyncing(false);
+    }
+  }
 
   return (
     <div className="space-y-8">
@@ -142,7 +214,12 @@ export default function ParticipantHackathons(){
               <Badge tone={r.derivedStatus==='REGISTRATION_OPEN'?'lime':r.derivedStatus==='LIVE'||r.derivedStatus==='SUBMISSION'?'coral':'muted'}>{r.derivedStatus}</Badge>
               <ArrowRight size={15} className="shrink-0 text-[#77798a]"/>
             </button>
-          )) : <div className="p-8 text-center text-sm text-[#77798a]">No published hackathons match. Try clearing filters.</div>}
+          )) : <div className="p-8 text-center text-sm text-[#77798a]">
+            <p>No published hackathons match. Try clearing filters.</p>
+            <p className="mx-auto mt-2 max-w-sm text-xs leading-5">If an organizer just published one, it may not have synced yet — pull the latest published updates (never creates or modifies anything).</p>
+            <button onClick={syncNow} disabled={syncing} className="mt-3 rounded-xl bg-[#171a2d] px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{syncing?'Syncing…':'Sync from organizer'}</button>
+            {syncMsg && <p className="mt-2 text-xs text-[#55586a]">{syncMsg}</p>}
+          </div>}
         </div>
 
         {/* Detail with tabs */}
@@ -171,21 +248,13 @@ export default function ParticipantHackathons(){
                   </div>
                 )}
                 {tab==='Timeline' && (
-                  <div className="space-y-2">{phases.length?phases.map((p:any,i:number)=><div key={i} className="flex justify-between rounded-xl border border-[#e5e1d7] px-3 py-2 text-xs"><span className="font-semibold">{p.name}</span><span>{p.startsAt?new Date(p.startsAt).toLocaleDateString():''} → {p.endsAt?new Date(p.endsAt).toLocaleDateString():''}</span></div>):<span className="text-[#77798a]">Timeline published by organizer.</span>}</div>
+                  <div className="space-y-2">{phases.length?phases.map((p:any,i:number)=><div key={i} className="flex justify-between gap-3 rounded-xl border border-[#e5e1d7] px-3 py-2 text-xs"><span className="font-semibold">{p.order ? `#${p.order} ` : ''}{p.name}</span><span className="whitespace-nowrap font-mono">{fmtDT(p.startsAt)} → {fmtDT(p.endsAt)}</span></div>):<span className="text-[#77798a]">Timeline published by organizer.</span>}</div>
                 )}
                 {tab==='Rules' && <ul className="list-disc pl-5">{(selected.rules??[]).map((r:string,i:number)=><li key={i}>{r}</li>)}</ul>}
                 {tab==='Resources' && <div className="grid gap-2">{resources.map((r:any,i:number)=><a key={i} href={r.url} target="_blank" rel="noreferrer" className="rounded-xl border border-[#dedbd1] px-3 py-2 text-xs hover:bg-[#f4f1e8]">{r.name ?? r.title}</a>)}</div>}
                 {tab==='Prizes' && <p className="text-[#77798a]">Prizes announced by organizer{selected.prizes?`: ${(selected.prizes as any[]).map((p:any)=>p.title).join(', ')}`:'.'}</p>}
                 {tab==='Judging' && <div className="space-y-2">{criteria.map((c:any,i:number)=><div key={i} className="flex justify-between rounded-xl bg-[#f4f1e8] px-3 py-2 text-xs"><span>{c.name}</span><span className="font-mono font-bold">{c.weight?Math.round(c.weight*100)+'%':'—'}</span></div>)}</div>}
                 {tab==='FAQs' && <p className="text-[#77798a]">FAQs published by organizer appear here.</p>}
-                {tab==='Register' && (
-                  <div className="rounded-xl bg-[#f4f1e8] p-4">
-                    <div className="flex items-center gap-2 text-xs font-bold"><ShieldCheck size={14} className="text-[#5aafbd]"/> Registration uses your skill profile — no repeated forms</div>
-                    <button onClick={register} disabled={registering} className="mt-3 rounded-xl bg-[#f26a4f] px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{registering?'Registering…':'Register for this hackathon'}</button>
-                    {registerMsg && <p className="mt-2 text-xs text-[#55586a]">{registerMsg} <Link href="/participant/profile" className="underline">Open skill profile</Link></p>}
-                    <div className="mt-3 flex items-center gap-2 text-[11px] text-[#77798a]"><Clock3 size={12}/> Registration ends: {selected.registrationEnd?new Date(selected.registrationEnd).toLocaleString():'see timeline'} · <Trophy size={12}/> Team choice after confirm → My Hackathons</div>
-                  </div>
-                )}
               </div>
               {!!anns.length && (
                 <div className="mt-6 rounded-2xl bg-[#171a2d] p-4 text-[#fdfbf5]">
@@ -193,6 +262,61 @@ export default function ParticipantHackathons(){
                   <div className="mt-2 space-y-2">{anns.slice(0,3).map((a:any)=><div key={a.id} className="rounded-xl bg-[#252941] p-3 text-xs"><b>{a.title}</b><p className="text-[#b9bdca]">{a.content}</p></div>)}</div>
                 </div>
               )}
+              {/* Registration — visually separated action section (not an info tab),
+                  always last in the details card, after every informational section.
+                  State A (unregistered): form. State B (registered, no team):
+                  team choice. State C (in team): manage. State D (locked):
+                  closed status. Membership re-read from the backend. */}
+              <div className="mt-6 rounded-2xl border-2 border-[#171a2d] bg-[#fffdf5] p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-sm font-bold"><ShieldCheck size={15} className="text-[#f26a4f]"/> Registration</div>
+                  {lock.locked
+                    ? <Badge tone="muted">Registration closed</Badge>
+                    : isRegistered
+                      ? <Badge tone="lime">Registered</Badge>
+                      : <Badge tone="coral">Not registered</Badge>}
+                </div>
+                {lock.locked && <p className="mt-2 text-xs leading-5 text-[#77798a]">{lock.reason}</p>}
+                {lock.locked && !isRegistered ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className="rounded-xl bg-[#e9e5da] px-4 py-2 text-xs font-bold text-[#77798a]">Registration closed</span>
+                  </div>
+                ) : !isRegistered ? (
+                  <div className="mt-3">
+                    <RegistrationForm
+                      hackathon={selected}
+                      onRegistered={(id)=>{ setRegisteredIds((prev)=> new Set(prev).add(id)); setRegisterMsg('Registered — continue to team choice.'); refreshSelectedTeam(); }}
+                    />
+                  </div>
+                ) : myTeamSelected ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className="rounded-xl bg-[#d8e35b] px-4 py-2 text-xs font-bold text-[#171a2d]">Registered</span>
+                    <Link href="/participant/my-hackathons" className="rounded-xl bg-[#171a2d] px-4 py-2 text-xs font-bold text-white">Open hackathon</Link>
+                    <Link href={`/participant/teams?hackathon=${selected.id}`} className="rounded-xl bg-[#f26a4f] px-4 py-2 text-xs font-bold text-white">View your team</Link>
+                  </div>
+                ) : lock.locked ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className="rounded-xl bg-[#d8e35b] px-4 py-2 text-xs font-bold text-[#171a2d]">Registered</span>
+                    <Link href="/participant/my-hackathons" className="rounded-xl bg-[#171a2d] px-4 py-2 text-xs font-bold text-white">Open hackathon</Link>
+                  </div>
+                ) : (
+                  <div className="mt-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-xl bg-[#d8e35b] px-4 py-2 text-xs font-bold text-[#171a2d]">Registered</span>
+                      <Link href="/participant/my-hackathons" className="rounded-xl bg-[#171a2d] px-4 py-2 text-xs font-bold text-white">Open hackathon</Link>
+                    </div>
+                    <div className="mt-3 rounded-xl border border-[#dedbd1] bg-white p-3">
+                      <div className="text-xs font-bold">Next: choose how you compete</div>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        <Link href={`/participant/teams?hackathon=${selected.id}&view=create`} className="rounded-xl bg-[#f26a4f] px-4 py-2.5 text-center text-xs font-bold text-white">Create team</Link>
+                        <Link href={`/participant/teams?hackathon=${selected.id}&view=join`} className="rounded-xl border border-[#dedbd1] px-4 py-2.5 text-center text-xs font-bold">Join team</Link>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {registerMsg && <p className="mt-2 text-xs text-[#55586a]">{registerMsg}</p>}
+                <div className="mt-3 flex items-center gap-2 text-[11px] text-[#77798a]"><Clock3 size={12}/> Registration ends: {selected.registrationEnd?new Date(selected.registrationEnd).toLocaleString():'see timeline'} · <Trophy size={12}/> Team choice after confirm → My Hackathons</div>
+              </div>
             </>
           ) : <div className="text-sm text-[#77798a]">Select a hackathon to see details.</div>}
         </div>
