@@ -19,8 +19,10 @@ export class DefaultAIAdapter extends AIProvider {
 
   constructor(private readonly configService: ConfigService) {
     super();
-    const provider = (this.configService.get<string>('AI_PROVIDER') as 'mock' | 'external') ?? 'mock';
     const apiKey = this.configService.get<string>('AI_API_KEY') ?? '';
+    const provider = apiKey
+      ? ((this.configService.get<string>('AI_PROVIDER') as 'mock' | 'external') ?? 'mock')
+      : 'mock';
     const model = this.configService.get<string>('AI_MODEL') ?? '';
     const baseUrl = this.configService.get<string>('AI_BASE_URL') ?? '';
     const timeoutMs = this.configService.get<number>('AI_TIMEOUT_MS') ?? 15000;

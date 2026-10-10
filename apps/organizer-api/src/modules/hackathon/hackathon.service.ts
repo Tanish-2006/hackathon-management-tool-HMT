@@ -97,7 +97,7 @@ export class HackathonService {
       try {
         const env = this.safeLoadEnvForAI();
         const aiService = new AIService({
-          provider: env?.AI_PROVIDER as 'mock' | 'external',
+          provider: (env?.AI_API_KEY ? env.AI_PROVIDER : 'mock') as 'mock' | 'external',
           apiKey: env?.AI_API_KEY ?? '',
           model: env?.AI_MODEL ?? '',
           baseUrl: env?.AI_BASE_URL ?? '',
@@ -269,7 +269,7 @@ export class HackathonService {
       try {
         const env = this.safeLoadEnvForAI();
         const aiService = new AIService({
-          provider: env?.AI_PROVIDER as 'mock' | 'external',
+          provider: (env?.AI_API_KEY ? env.AI_PROVIDER : 'mock') as 'mock' | 'external',
           apiKey: env?.AI_API_KEY ?? '',
           model: env?.AI_MODEL ?? '',
           baseUrl: env?.AI_BASE_URL ?? '',
