@@ -29,23 +29,27 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
-    if (!payload || !payload.sub) {
+    if (!payload || typeof payload !== 'object') {
       throw new UnauthorizedException('Invalid token payload');
     }
-    // OWASP JWT validation: enforce issuer/audience and token type
-    if (payload.iss && payload.iss !== 'hmt') {
+    if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
+      throw new UnauthorizedException('Invalid token payload');
+    }
+    // OWASP JWT validation: require issuer/audience and access type.
+    // Missing claims are rejected (not skipped) so mis-issued tokens fail closed.
+    if (payload.iss !== 'hmt') {
       throw new UnauthorizedException('Invalid token issuer');
     }
-    if (payload.aud && payload.aud !== 'hmt:api') {
+    if (payload.aud !== 'hmt:api') {
       throw new UnauthorizedException('Invalid token audience');
     }
-    // Prevent role escalation: if type field present, must be 'access'
-    if (payload.type && payload.type !== 'access') {
+    // Only access tokens authenticate API requests; refresh tokens must use /auth/refresh.
+    if (payload.type !== 'access') {
       throw new UnauthorizedException('Invalid token type: expected access');
     }
-    // Role must be one of allowed values
+    // Role is required and must be allowlisted (missing role fails closed).
     const allowedRoles = ['PARTICIPANT', 'MENTOR', 'ORGANIZER', 'ADMIN'];
-    if (payload.role && !allowedRoles.includes(payload.role)) {
+    if (typeof payload.role !== 'string' || !allowedRoles.includes(payload.role)) {
       throw new UnauthorizedException('Invalid role in token');
     }
     // Access-token revocation (logout / session revoke / logout-all).

@@ -73,7 +73,10 @@ export default function ParticipantDashboard() {
         if (hv?.id) {
           hmtBackendService.getMyRegistrations().then((regs:any)=>{
             const list = Array.isArray(regs)?regs:(regs?.data??[]);
-            if(mounted) setRegistration(list.find((r:any)=>r.hackathonId===hv.id) ?? null);
+            const reg = list.find((r:any)=>r.hackathonId===hv.id) ?? null;
+            if(mounted) setRegistration(reg);
+            // Timeline feeds the progress card only — skip it until registered.
+            if (reg) hmtBackendService.getTimeline().then((t)=>{ if(mounted) setTimeline(t); }).catch(()=>null);
           }).catch(()=>null);
           hmtBackendService.getAiAccessStatus().then(r=>{ if(mounted) setAiAccess(r); }).catch(()=>null);
         }
@@ -92,8 +95,8 @@ export default function ParticipantDashboard() {
             hmtBackendService.checkRepositoryAccess(p.id).then(r=> setRepoStatus(r as any)).catch(()=> setRepoStatus({ hasAccess:false }));
           }
         }
-        // timeline best effort
-        hmtBackendService.getTimeline().then(setTimeline).catch(()=>null);
+        // (Timeline loads inside the registration callback above — it feeds
+        // the progress card, which stays locked until registered.)
       } catch (e) { if (mounted) setError(friendlyError(e)); }
       finally { if (mounted) setLoading(false); }
     }
@@ -106,6 +109,11 @@ export default function ParticipantDashboard() {
   const daysLeft = hackathon?.endDate ? Math.max(0, Math.ceil((new Date(hackathon.endDate).getTime() - Date.now())/86400000)) : null;
   const hasTeam = !!team && !!team.id;
   const hasProject = !!project && !!project.id;
+  // Participant state machine (real backend state, never faked):
+  // - no hackathon          → discover to get started
+  // - hackathon, unregistered → register CTA; team/project/progress locked
+  // - registered            → contextual team/project/progress workflow
+  const isRegistered = !!registration;
 
   if (loading) {
     return <div className="space-y-6">
@@ -134,70 +142,48 @@ export default function ParticipantDashboard() {
         </div>
         <div className="flex gap-2">
           <Link href="/participant/hackathons" className="inline-flex items-center gap-2 rounded-xl border border-[#dedbd1] px-4 py-3 text-sm font-bold hover:bg-[#f4f1e8]">Discover</Link>
-          <Link href="/participant/ai" className="inline-flex items-center gap-2 rounded-xl bg-[#171a2d] px-4 py-3 text-sm font-bold text-white hover:bg-[#252941]"><Sparkles size={16}/> {aiAccess?.allowed ? 'Ask AI teammate' : 'AI locked'} <ArrowRight size={14}/></Link>
         </div>
       </div>
       {hackathon && !registration && (
-        <div className="rounded-2xl border border-[#f26a4f]/30 bg-[#fff7ea] p-4 text-sm"><b>Next action:</b> register for {hackathon.title} — your skill profile is reused, no repeated forms. <Link href="/participant/hackathons" className="underline font-bold">Open Discover → Register</Link></div>
-      )}
-      {hackathon && aiAccess && !aiAccess.allowed && (
-        <div className="rounded-2xl border border-[#dedbd1] bg-[#f4f1e8] p-4 text-xs text-[#55586a]">AI Teammate: <b>{aiAccess.code === 'HACKATHON_NOT_LIVE' ? `locked (${aiAccess.derivedStatus})` : aiAccess.message}</b> — backend enforced, available only in the live window.</div>
+        <div className="rounded-2xl border border-[#f26a4f]/30 bg-[#fff7ea] p-4 text-sm"><b>Next action:</b> register for {hackathon.title} — your skill profile is reused, no repeated forms.</div>
       )}
 
-      {/* Current hackathon hero */}
-      {hackathon ? (
-        <motion.div initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} className="overflow-hidden rounded-[20px] border border-[#dedbd1] bg-[#fdfbf5]">
-          <div className="grid lg:grid-cols-[1.35fr_.75fr]">
-            <div className="p-6 sm:p-8">
-              <div className="flex items-center gap-2">
-                <Badge tone="lime">{hackathon.derivedStatus ?? (hackathon.isPublished ? 'PUBLISHED' : 'LIVE')}</Badge>
+      {/* Registered hackathon status strip — compact. Full event detail lives on Discover. */}
+      {hackathon && registration ? (
+        <Card className="p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone="lime">{hackathon.derivedStatus ?? 'PUBLISHED'}</Badge>
                 {phase && <Badge tone="dark">{phase.name || phase.status}</Badge>}
+                <Badge tone="blue">Registered</Badge>
                 {daysLeft !== null && <span className="font-mono text-xs text-[#77798a]">{daysLeft}d remaining</span>}
-                {registration && <Badge tone="blue">Registered</Badge>}
               </div>
-              <h2 className="mt-4 text-2xl font-bold tracking-[-.04em] text-[#171a2d]">{hackathon.title || hackathon.name || 'HMT Hackathon'}</h2>
-              <p className="mt-2 text-sm leading-6 text-[#77798a] line-clamp-3">{hackathon.description || 'Build enterprise-grade AI applications and autonomous agents.'}</p>
-
-              <div className="mt-6 grid grid-cols-3 gap-3">
-                <div className="rounded-xl bg-[#f4f1e8] p-3"><div className="font-mono text-[10px] uppercase tracking-wider text-[#77798a]">Phase</div><div className="mt-1 text-sm font-bold">{phase?.name || 'Foundation & Security'}</div><div className="text-xs text-[#5aafbd]">{phase?.status || 'ACTIVE'}</div></div>
-                <div className="rounded-xl bg-[#f4f1e8] p-3"><div className="font-mono text-[10px] uppercase tracking-wider text-[#77798a]">Timeline</div><div className="mt-1 text-sm font-bold">{hackathon.startDate ? new Date(hackathon.startDate).toLocaleDateString() : '—'} → {hackathon.endDate ? new Date(hackathon.endDate).toLocaleDateString() : '—'}</div><div className="text-xs text-[#77798a]">{hackathon.judgingCriteria?.length || 3} criteria</div></div>
-                <div className="rounded-xl bg-[#f4f1e8] p-3"><div className="font-mono text-[10px] uppercase tracking-wider text-[#77798a]">Problem</div><div className="mt-1 line-clamp-2 text-xs leading-5 text-[#171a2d]">{hackathon.problemStatement?.slice(0,110) || 'Build an AI teammate companion.'}</div></div>
-              </div>
-
-              <div className="mt-6 flex flex-wrap gap-2">
-                <Link href="/participant/hackathons" className="rounded-xl border border-[#dedbd1] px-3 py-2 text-xs font-bold hover:bg-[#f4f1e8]">View hackathon details <ChevronRight size={14} className="ml-1 inline"/></Link>
-                <Link href="/participant/projects" className="rounded-xl bg-[#f26a4f] px-3 py-2 text-xs font-bold text-white">Go to project</Link>
-              </div>
+              <div className="mt-2 truncate text-lg font-bold tracking-tight">{hackathon.title || hackathon.name || 'HMT Hackathon'}</div>
             </div>
-            <div className="border-t border-[#e5e1d7] bg-[#171a2d] p-6 text-[#fdfbf5] lg:border-l lg:border-t-0">
-              <div className="font-mono text-[10px] uppercase tracking-[.16em] text-[#d8e35b]">Deadlines & announcements</div>
-              <div className="mt-4 space-y-3">
-                {announcements.length ? announcements.map((a:any)=> (
-                  <div key={a.id} className="rounded-xl bg-[#252941] p-3">
-                    <div className="flex items-center gap-2 text-xs font-bold"><Megaphone size={14} className="text-[#d8e35b]"/>{a.title}</div>
-                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#b9bdca]">{a.content}</p>
-                  </div>
-                )) : <div className="rounded-xl bg-[#252941] p-4 text-xs text-[#9b9fb1]">No announcements yet. We will surface published updates here.</div>}
-              </div>
-              <div className="mt-6 flex items-center gap-2 text-xs text-[#9b9fb1]"><Clock3 size={14}/> Submission window closes in <b className="text-[#fdfbf5]">{daysLeft ?? '—'} days</b></div>
-              <Link href="/participant/hackathons" className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-[#d8e35b]">All announcements <ArrowRight size={13}/></Link>
-            </div>
+            <Link href="/participant/hackathons" className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-[#dedbd1] px-3 py-2 text-xs font-bold hover:bg-[#f4f1e8]">Details <ChevronRight size={14}/></Link>
           </div>
-        </motion.div>
-      ) : (
+        </Card>
+      ) : !hackathon ? (
         <Card className="p-8 text-center">
           <div className="mx-auto grid h-10 w-10 place-items-center rounded-xl bg-[#f4f1e8]"><Layers size={18}/></div>
-          <h3 className="mt-3 font-bold">No hackathon published yet</h3>
-          <p className="mx-auto mt-1 max-w-md text-sm text-[#77798a]">When organizers publish a hackathon, it will appear here with phases, deadlines and announcements.</p>
+          <h3 className="mt-3 font-bold">Discover a hackathon to get started</h3>
+          <p className="mx-auto mt-1 max-w-md text-sm text-[#77798a]">You&apos;re not registered for a hackathon yet. When organizers publish a hackathon, it appears in Discover — register there to unlock your team, project and AI teammate.</p>
+          <Link href="/participant/hackathons" className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#171a2d] px-4 py-2 text-xs font-bold text-white">Discover hackathons <ArrowRight size={14}/></Link>
         </Card>
-      )}
+      ) : null}
 
       {/* Team / Project / Deadlines grid */}
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Team */}
         <Card className="p-6">
-          <div className="flex items-center justify-between"><h3 className="font-bold tracking-tight flex items-center gap-2"><Users size={16} className="text-[#f26a4f]"/> Your team</h3><Badge tone={hasTeam ? 'lime' : 'muted'}>{hasTeam ? 'ACTIVE' : 'NO TEAM'}</Badge></div>
-          {hasTeam ? (
+          <div className="flex items-center justify-between"><h3 className="font-bold tracking-tight flex items-center gap-2"><Users size={16} className="text-[#f26a4f]"/> Your team</h3><Badge tone={hasTeam && isRegistered ? 'lime' : 'muted'}>{hasTeam && isRegistered ? 'ACTIVE' : 'NO TEAM'}</Badge></div>
+          {!isRegistered ? (
+            <div className="mt-4">
+              <p className="text-sm leading-6 text-[#77798a]">Team formation unlocks after you register for a hackathon.</p>
+              <Link href="/participant/hackathons" className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#f26a4f] px-4 py-2 text-xs font-bold text-white">Discover & register <ArrowRight size={14}/></Link>
+            </div>
+          ) : hasTeam ? (
             <div className="mt-4">
               <div className="text-lg font-bold">{team.name}</div>
               <div className="mt-1 text-xs text-[#77798a]">{team.members?.length || team._count?.members || '—'} members · {team.visibility || 'TEAM_DISCOVERABLE'}</div>
@@ -223,9 +209,14 @@ export default function ParticipantDashboard() {
         {/* Project */}
         <Card className="p-6">
           <div className="flex items-center justify-between"><h3 className="font-bold flex items-center gap-2"><FileText size={16} className="text-[#5aafbd]"/> Your project</h3>
-            <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${repoStatus?.hasAccess ? 'bg-[#d8e35b] text-[#171a2d]' : 'bg-[#e9e5da] text-[#77798a]'}`}>{repoStatus?.hasAccess ? 'CONNECTED' : 'NOT CONNECTED'}</span>
+            <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${repoStatus?.hasAccess && isRegistered ? 'bg-[#d8e35b] text-[#171a2d]' : 'bg-[#e9e5da] text-[#77798a]'}`}>{repoStatus?.hasAccess && isRegistered ? 'CONNECTED' : 'NOT CONNECTED'}</span>
           </div>
-          {hasProject ? (
+          {!isRegistered ? (
+            <div className="mt-4">
+              <p className="text-sm leading-6 text-[#77798a]">Your project workspace unlocks after registration — no placeholder progress until then.</p>
+              <Link href="/participant/hackathons" className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#171a2d] px-4 py-2 text-xs font-bold text-white">Discover & register <ArrowRight size={14}/></Link>
+            </div>
+          ) : hasProject ? (
             <div className="mt-4">
               <div className="text-lg font-bold line-clamp-1">{project.title}</div>
               <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#77798a]">{project.description || 'No description yet.'}</p>
@@ -251,43 +242,22 @@ export default function ParticipantDashboard() {
         <DarkCard className="p-6">
           <div className="font-mono text-[10px] uppercase tracking-[.16em] text-[#d8e35b]">Progress & evaluation</div>
           <h3 className="mt-2 text-lg font-bold">Keep shipping</h3>
+          {!isRegistered ? (
+            <div className="mt-4 rounded-xl bg-[#252941] p-4 text-xs leading-5 text-[#9b9fb1]">
+              No progress to show yet — phase progress, mentor feedback and scores appear here after you register for a hackathon.
+              <Link href="/participant/hackathons" className="mt-3 inline-flex items-center gap-1 font-bold text-[#d8e35b]">Discover hackathons <ArrowRight size={13}/></Link>
+            </div>
+          ) : (
           <div className="mt-4 space-y-3">
             <div className="flex items-center gap-3 rounded-xl bg-[#252941] p-3"><div className="grid h-8 w-8 place-items-center rounded-lg bg-[#d8e35b] text-[#171a2d]"><Target size={16}/></div><div><div className="text-xs font-bold">Phase progress</div><div className="text-xs text-[#9b9fb1]">{timeline?.phaseProgress?.length || 0} updates · {timeline?.phaseProgress?.[0]?.status || 'In progress'}</div></div></div>
             <div className="flex items-center gap-3 rounded-xl bg-[#252941] p-3"><div className="grid h-8 w-8 place-items-center rounded-lg bg-[#5aafbd] text-[#171a2d]"><Trophy size={16}/></div><div><div className="text-xs font-bold">Evaluation</div><div className="text-xs text-[#9b9fb1]">{timeline?.evaluations?.length || 0} scores · mentor feedback {timeline?.feedbacks?.length || 0}</div></div></div>
-            <div className="rounded-xl border border-[#2c3047] p-3">
-              <div className="flex items-center justify-between text-xs"><span className="text-[#9b9fb1]">Project completeness</span><span className="font-mono text-[#d8e35b]">{hasProject ? '64%' : '12%'}</span></div>
-              <div className="mt-2 h-2 rounded-full bg-[#252941]"><div className="h-full rounded-full bg-[#d8e35b]" style={{ width: hasProject ? '64%' : '12%' }}/></div>
-            </div>
           </div>
+          )}
           <div className="mt-5 grid grid-cols-2 gap-2">
             <Link href="/participant/performance" className="rounded-xl bg-[#fdfbf5] px-3 py-2 text-center text-xs font-bold text-[#171a2d]">View performance</Link>
-            <Link href="/participant/ai" className="rounded-xl border border-[#3a3e5a] px-3 py-2 text-center text-xs font-bold">Ask AI</Link>
+            <Link href={isRegistered && hackathon?.id ? `/participant/my-hackathons/${hackathon.id}/ai` : '/participant/my-hackathons'} className="rounded-xl border border-[#3a3e5a] px-3 py-2 text-center text-xs font-bold">Ask AI</Link>
           </div>
         </DarkCard>
-      </div>
-
-      {/* Bottom row */}
-      <div className="grid gap-6 lg:grid-cols-[1.2fr_.8fr]">
-        <Card className="p-6">
-          <div className="flex items-center justify-between"><h3 className="font-bold flex items-center gap-2"><Calendar size={16}/> Hackathon context</h3><Badge tone="muted">Phase-aware</Badge></div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl bg-[#f4f1e8] p-4"><div className="text-xs font-bold">Judging criteria</div><div className="mt-2 space-y-1.5">{(hackathon?.judgingCriteria||[]).slice(0,3).map((c:any,i:number)=><div key={i} className="flex justify-between text-xs"><span className="text-[#77798a]">{c.name || c.criteria || `Criteria ${i+1}`}</span><span className="font-mono font-bold">{c.weight ? `${Math.round(c.weight*100)}%` : '—'}</span></div>)}{(hackathon?.judgingCriteria||[]).length===0 && <div className="text-xs text-[#77798a]">Technical Depth 35% · AI Teammate 35% · UX 30%</div>}</div></div>
-            <div className="rounded-xl bg-[#f4f1e8] p-4"><div className="text-xs font-bold">Resources</div><div className="mt-2 space-y-1.5">{(hackathon?.resources||[]).slice(0,3).map((r:any,i:number)=><a key={i} href={r.url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs text-[#5aafbd] underline">{r.name || r.title}<ExternalLink size={11}/></a>)}{(hackathon?.resources||[]).length===0 && <div className="text-xs text-[#77798a]">Participant API Specs · Neo4j Graph Schema</div>}</div></div>
-          </div>
-          <div className="mt-4 rounded-xl border border-dashed border-[#dedbd1] p-4">
-            <div className="flex items-start gap-2 text-xs leading-5 text-[#77798a]"><ShieldCheck size={14} className="mt-0.5 text-[#5aafbd]"/><span><b className="text-[#171a2d]">Read-only by default.</b> Repository URLs and AI deep analysis are hidden until your team leader grants access.</span></div>
-          </div>
-        </Card>
-
-        <Card className="p-6">
-          <h3 className="font-bold flex items-center gap-2"><Zap size={16} className="text-[#f26a4f]"/> Quick actions</h3>
-          <div className="mt-4 grid gap-2">
-            <Link href="/participant/teams" className="flex items-center justify-between rounded-xl border border-[#dedbd1] p-3 hover:bg-[#f4f1e8]"><span className="text-sm font-semibold">Discover teams</span><ChevronRight size={16} className="text-[#77798a]"/></Link>
-            <Link href="/participant/projects" className="flex items-center justify-between rounded-xl border border-[#dedbd1] p-3 hover:bg-[#f4f1e8]"><span className="text-sm font-semibold">Update project</span><ChevronRight size={16} className="text-[#77798a]"/></Link>
-            <Link href="/participant/github" className="flex items-center justify-between rounded-xl border border-[#dedbd1] p-3 hover:bg-[#f4f1e8]"><span className="text-sm font-semibold flex items-center gap-2"><Github size={14}/> Connect GitHub</span><span className={`text-[10px] font-bold px-2 py-1 rounded-full ${repoStatus?.hasAccess ? 'bg-[#d8e35b] text-[#171a2d]' : 'bg-[#f26a4f] text-white'}`}>{repoStatus?.hasAccess?'GRANTED':'CONNECT'}</span></Link>
-            <Link href="/participant/performance" className="flex items-center justify-between rounded-xl bg-[#171a2d] p-3 text-white"><span className="text-sm font-bold">See feedback & scores</span><ArrowRight size={16}/></Link>
-          </div>
-        </Card>
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ import {
   IsEnum,
   IsNumber,
   IsBoolean,
+  MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { VisibilityLevel } from '../../common/enums/visibility.enum';
@@ -97,5 +98,76 @@ export class InterestDto {
 export class JoinTeamDto {
   @ApiProperty({ example: 'team_id_123' })
   @IsString()
+  teamId: string;
+}
+
+export class JoinByCodeDto {
+  @ApiProperty({ example: 'Innovators' })
+  @IsString()
+  @IsNotEmpty()
+  teamName: string;
+
+  @ApiProperty({ example: 'HMT-A7K9Q2' })
+  @IsString()
+  @IsNotEmpty()
+  tid: string;
+
+  @ApiProperty({ example: 'hack_123456' })
+  @IsString()
+  @IsNotEmpty()
+  hackathonId: string;
+}
+
+export class JoinRequestDto {
+  @ApiProperty({ example: 'team_id_123' })
+  @IsString()
+  @IsNotEmpty()
+  teamId: string;
+
+  @ApiPropertyOptional({ example: 'I build APIs and would love to join!' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(500)
+  message?: string;
+
+  // Short skill answers (4 questions, optional). Stored on the request and
+  // shown ONLY to the team leader / authorized reviewers — never to other
+  // participants. Not an approval authority, just context.
+  @ApiPropertyOptional({ example: 'backend' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(300)
+  skillRole?: string;
+
+  @ApiPropertyOptional({ example: 'TypeScript, Postgres' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(300)
+  skillLanguages?: string;
+
+  @ApiPropertyOptional({ example: 'Built 3 REST APIs' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(300)
+  skillExperience?: string;
+
+  @ApiPropertyOptional({ example: 'APIs, testing, docs' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(300)
+  skillContribution?: string;
+}
+
+export class TransferLeadershipDto {
+  @ApiProperty({ example: 'user_123' })
+  @IsString()
+  @IsNotEmpty()
+  toUserId: string;
+}
+
+export class LeaveRequestDto {
+  @ApiProperty({ example: 'team_id_123' })
+  @IsString()
+  @IsNotEmpty()
   teamId: string;
 }

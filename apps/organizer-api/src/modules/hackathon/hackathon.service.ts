@@ -8,7 +8,7 @@ import { auditService } from '../audit/audit.service';
 import { normalizeTimeline, verifyTimelineInWindow } from '../timeline/timeline-normalizer';
 import { AIService } from '@hmt/ai';
 import { AIGateway } from '@hmt/ai';
-import { loadBaseEnv } from '@hmt/config';
+import { loadBaseEnv, resolveSyncSecret } from '@hmt/config';
 
 // Hackathon scalar fields mapped to review-section provenance keys.
 const PROVENANCE_FIELD_MAP: Record<string, string> = {
@@ -42,6 +42,13 @@ const EXTENDED_DRAFT_KEYS = [
 // Server-side cross-field validation for Step 8 participation config.
 // Shape-level checks live in updateSchema (zod); this enforces the rules
 // zod cannot express across fields. Returns an error message or null.
+export const REPO_REQUIREMENT_VALUES = ['REQUIRED', 'OPTIONAL', 'DISABLED'] as const;
+export type RepoRequirement = (typeof REPO_REQUIREMENT_VALUES)[number];
+
+/** Normalize organizer input / event data to a safe requirement (default OPTIONAL). */
+export function normalizeRepoRequirement(value: unknown): RepoRequirement {
+  return value === 'REQUIRED' || value === 'DISABLED' ? value : 'OPTIONAL';
+}
 function validateParticipationConfig(cfg: Record<string, unknown>): string | null {
   const mode = cfg.mode as string | undefined;
   if (mode !== undefined && !['INDIVIDUAL', 'TEAMS', 'BOTH'].includes(mode)) {
@@ -897,7 +904,8 @@ export class HackathonService {
     try {
       const env = loadBaseEnv();
       base = (env.PARTICIPANT_API_URL ?? '').replace(/\/$/, '');
-      secret = env.SYNC_SHARED_SECRET ?? '';
+      // Effective secret (explicit config or non-prod dev default).
+      secret = resolveSyncSecret();
     } catch {
       return;
     }
@@ -1091,6 +1099,12 @@ export class HackathonService {
         category: hackathon.category ?? (themeNames || undefined),
         tags: hackathon.tags ?? hackathon.themeIds,
         organizerName: hackathon.organizerName ?? undefined,
+        // Repository requirement travels with the publish event so the
+        // participant read-model enforces the same rule. Absent on old
+        // events → participant defaults to OPTIONAL.
+        repoRequirement: normalizeRepoRequirement(
+          ((draft.participation ?? {}) as Record<string, unknown>).repoRequirement,
+        ),
       },
     };
     memoryStore.publishedEvents.set(hackathon.id, event);

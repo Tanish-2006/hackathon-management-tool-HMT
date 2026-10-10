@@ -114,6 +114,13 @@ model Profile {
   githubUrl   String?
   skills      String[] @default([])
   experience  String?
+  // Basic participant details (editable on the Profile page, reused by the
+  // hackathon registration form). Nullable so existing rows need no backfill.
+  institution         String?
+  institutionLocation String?
+  city                String?
+  course              String?
+  yearOfStudy         String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -325,6 +332,58 @@ model TeamInterest {
 
   @@unique([teamId, userId])
   @@map("team_interests")
+}
+
+model TeamJoinRequest {
+  id          String   @id @default(uuid())
+  teamId      String
+  hackathonId String?
+  userId      String
+  message     String?
+  status      String   @default("PENDING")
+  decidedAt   DateTime?
+  decidedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([teamId, status])
+  @@index([userId, status])
+  @@map("team_join_requests")
+}
+
+model TeamLeaveRequest {
+  id          String   @id @default(uuid())
+  teamId      String
+  hackathonId String?
+  userId      String
+  status      String   @default("PENDING")
+  decidedAt   DateTime?
+  decidedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([teamId, status])
+  @@index([userId, status])
+  @@map("team_leave_requests")
+}
+
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String
+  type        String
+  title       String
+  body        String?
+  teamId      String?
+  hackathonId String?
+  requestId   String?
+  requestKind String?
+  link        String?
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  readAt      DateTime?
+
+  @@index([userId, read])
+  @@map("notifications")
 }
 
 model Project {

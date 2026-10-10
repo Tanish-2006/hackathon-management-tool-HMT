@@ -14,7 +14,7 @@ import ParticipantHackathons from '@/pages/participant/hackathons';
 import MyHackathons from '@/pages/participant/my-hackathons';
 import ParticipantTeams from '@/pages/participant/teams';
 import ParticipantProjects from '@/pages/participant/projects';
-import ParticipantAI from '@/pages/participant/ai';
+import { ParticipantHackathonAI, LegacyAIRedirect } from '@/pages/participant/hackathon-ai';
 import ParticipantGithub from '@/pages/participant/github';
 import ParticipantPerformance from '@/pages/participant/performance';
 import ParticipantLearning from '@/pages/participant/learning';
@@ -46,15 +46,14 @@ function Logo({ inverse = false }: { inverse?: boolean }) {
 }
 
 // Minimal IA: every capability gets one home (Unstop/Hack2Skill pattern).
-// Participant: Home → Discover → My Hackathons → Team → Project → AI → Progress → Profile.
-// Organizer kept as separate workspace; Judge/Leaderboard/Sponsors removed from primary nav.
+// Participant: Home → Discover → My Hackathons → (workspace: Team → Project → AI Teammate) → Progress → Profile.
+// AI Teammate is NOT a global tab — it lives inside each registered hackathon workspace.
 const participantNav = [
   { href: '/participant/dashboard', label: 'Home', icon: LayoutDashboard },
   { href: '/participant/hackathons', label: 'Discover', icon: Search },
   { href: '/participant/my-hackathons', label: 'My Hackathons', icon: Flag },
   { href: '/participant/teams', label: 'My Team', icon: Users },
   { href: '/participant/projects', label: 'My Project', icon: FileText },
-  { href: '/participant/ai', label: 'AI Teammate', icon: Sparkles },
   { href: '/participant/performance', label: 'Progress', icon: BarChart3 },
   { href: '/participant/profile', label: 'Profile', icon: Settings2 },
 ];
@@ -88,7 +87,6 @@ const navItems = [
   { href: '/participant/my-hackathons', label: 'My Hackathons', icon: Flag },
   { href: '/participant/teams', label: 'My Team', icon: Users },
   { href: '/participant/projects', label: 'My Project', icon: FileText },
-  { href: '/participant/ai', label: 'AI Teammate', icon: Sparkles },
   { href: '/organizer', label: 'Organizer', icon: BarChart3 },
 ];
 
@@ -97,6 +95,50 @@ function Shell({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [notices, setNotices] = useState(false);
   const { user, logout } = useAuth();
+  // Real notification inbox: unread badge + list are driven by the persisted
+  // backend inbox (GET /notifications), never by static copy. Refreshed on
+  // navigation and every 30s while signed in.
+  const [notifCount, setNotifCount] = useState(0);
+  const [notifList, setNotifList] = useState<any[]>([]);
+  const [notifLoading, setNotifLoading] = useState(false);
+  async function refreshNotifs(withList: boolean) {
+    if (!user) { setNotifCount(0); if (withList) setNotifList([]); return; }
+    try {
+      const c: any = await hmtBackendService.getUnreadCount().catch(() => null);
+      if (c && typeof c.count === 'number') setNotifCount(c.count);
+      if (withList) {
+        setNotifLoading(true);
+        const l: any = await hmtBackendService.getNotifications().catch(() => null);
+        setNotifList(Array.isArray(l) ? l : (l?.data ?? []));
+        setNotifLoading(false);
+      }
+    } catch { setNotifLoading(false); }
+  }
+  useEffect(() => { refreshNotifs(false); }, [location]);
+  useEffect(() => {
+    if (!user) return;
+    refreshNotifs(false);
+    const t = setInterval(() => refreshNotifs(false), 30000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+  function toggleNotices() {
+    const next = !notices;
+    setNotices(next);
+    if (next) refreshNotifs(true);
+  }
+  async function openNotif(n: any) {
+    try { await hmtBackendService.markNotificationRead(n.id); } catch { /* keep navigation working */ }
+    setNotifList((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
+    setNotifCount((c) => Math.max(0, c - 1));
+    setNotices(false);
+    if (n.link) setLocation(n.link);
+  }
+  async function readAllNotifs() {
+    try { await hmtBackendService.markAllNotificationsRead(); } catch { /* reflect locally anyway */ }
+    setNotifList((prev) => prev.map((x) => ({ ...x, read: true })));
+    setNotifCount(0);
+  }
   // Role-aware minimal nav: every entry must be accessible to the shown role,
   // otherwise the permission guard strands the user. ADMIN passes all guards,
   // so it keeps the combined workspace; ORGANIZER/MENTOR get role-safe links only.
@@ -116,12 +158,12 @@ function Shell({ children }: { children: React.ReactNode }) {
     <aside className={cn('hmt-sidebar fixed inset-y-0 left-0 z-30 flex w-[248px] flex-col border-r border-[#2c3047] px-5 py-6 transition-transform duration-300 lg:static lg:translate-x-0', open ? 'translate-x-0' : '-translate-x-full')}>
       <div className="flex items-center justify-between"><Logo inverse /><button onClick={() => setOpen(false)} className="rounded-md p-1 text-[#c4c7d2] lg:hidden" aria-label="Close menu" data-testid="button-close-menu"><X size={18} /></button></div>
       <div className="mt-12"><div className="mb-3 px-3 font-mono-ui text-[10px] uppercase tracking-[.16em] text-[#8d91a9]">Workspace</div>{visibleNavItems.map(({ href, label, icon: Icon }) => <Link key={href} href={href} onClick={() => setOpen(false)} className={cn('mb-1 flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-colors hover:bg-[#2c3047]', location.startsWith(href) && 'bg-[#f26a4f] text-[#fdfbf5] hover:bg-[#f26a4f]')} data-testid={`link-nav-${label.toLowerCase().replaceAll(' ', '-')}`}><Icon size={16} strokeWidth={1.8} /><span>{label}</span>{href === '/judge' && <span className="ml-auto rounded-full bg-[#d8e35b] px-1.5 py-0.5 font-mono-ui text-[9px] text-[#171a2d]">7</span>}</Link>)}</div>
-      <div className="mt-auto space-y-1"><Link href="/hackathon/create" className="mb-4 flex items-center justify-center gap-2 rounded-xl bg-[#d8e35b] px-3 py-3 text-[13px] font-bold text-[#171a2d] transition-transform hover:-translate-y-0.5" data-testid="link-create-sidebar"><Plus size={16} /> New hackathon</Link><Link href="/login" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] text-[#c4c7d2] hover:bg-[#2c3047]" data-testid="link-switch-role"><Users size={16} /> Switch role</Link><button onClick={() => setNotices(true)} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] text-[#c4c7d2] hover:bg-[#2c3047]" data-testid="button-help"><CircleHelp size={16} /> Help center</button></div>
+      <div className="mt-auto space-y-1">{(user?.role === 'ORGANIZER' || user?.role === 'ADMIN') && <Link href="/hackathon/create" className="mb-4 flex items-center justify-center gap-2 rounded-xl bg-[#d8e35b] px-3 py-3 text-[13px] font-bold text-[#171a2d] transition-transform hover:-translate-y-0.5" data-testid="link-create-sidebar"><Plus size={16} /> New hackathon</Link>}<Link href="/login" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] text-[#c4c7d2] hover:bg-[#2c3047]" data-testid="link-switch-role"><Users size={16} /> Switch role</Link><button onClick={() => setNotices(true)} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] text-[#c4c7d2] hover:bg-[#2c3047]" data-testid="button-help"><CircleHelp size={16} /> Help center</button></div>
     </aside>
     {open && <button className="fixed inset-0 z-20 bg-[#171a2d]/40 lg:hidden" onClick={() => setOpen(false)} aria-label="Close navigation" data-testid="button-overlay" />}
     <main className="min-w-0 flex-1">
-      <header className="sticky top-0 z-10 flex h-[72px] items-center justify-between border-b border-[#dedbd1] bg-[#f4f1e8]/90 px-5 backdrop-blur-md lg:px-10"><div className="flex items-center gap-3"><button onClick={() => setOpen(true)} className="rounded-lg p-2 hover:bg-[#e9e5da] lg:hidden" aria-label="Open menu" data-testid="button-open-menu"><Menu size={20} /></button><span className="hidden font-mono-ui text-[10px] uppercase tracking-[.18em] text-[#77798a] sm:block">HMT / 2026 workspace</span></div><div className="flex items-center gap-3"><button onClick={() => setNotices(!notices)} className="relative rounded-lg p-2 text-[#51546a] hover:bg-[#e9e5da]" aria-label="Notifications" data-testid="button-notifications"><Bell size={18} />{!notices && <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[#f26a4f]" />}</button><div className="flex items-center gap-2 border-l border-[#dedbd1] pl-3"><div className="grid h-8 w-8 place-items-center rounded-full bg-[#5aafbd] text-xs font-bold text-[#171a2d]">{user ? initialsOf(user) : '?'}</div><div className="hidden text-left sm:block"><div className="text-xs font-semibold">{user ? displayNameOf(user) : 'Sign in'}</div><div className="font-mono-ui text-[9px] uppercase tracking-wider text-[#77798a]">{user ? user.role.charAt(0) + user.role.slice(1).toLowerCase() : 'Guest'}</div></div><ChevronDown size={14} className="text-[#77798a]" /></div>{user && <button onClick={handleLogout} className="flex items-center gap-1.5 rounded-lg border border-[#dedbd1] px-3 py-2 text-xs font-bold text-[#51546a] transition-colors hover:bg-[#e9e5da]" aria-label="Log out" data-testid="button-logout"><LogOut size={14} /><span className="hidden sm:inline">Logout</span></button>}</div></header>
-      {notices && <div className="absolute right-5 top-[64px] z-20 w-72 rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-4 shadow-xl lg:right-10"><div className="flex items-center justify-between"><b className="text-sm">Inbox</b><button onClick={() => setNotices(false)} aria-label="Close inbox" data-testid="button-close-inbox"><X size={15} /></button></div><p className="mt-3 text-xs leading-relaxed text-[#77798a]">Your judging room opens tomorrow at 09:30. Seven submissions are waiting for a review.</p></div>}
+      <header className="sticky top-0 z-10 flex h-[72px] items-center justify-between border-b border-[#dedbd1] bg-[#f4f1e8]/90 px-5 backdrop-blur-md lg:px-10"><div className="flex items-center gap-3"><button onClick={() => setOpen(true)} className="rounded-lg p-2 hover:bg-[#e9e5da] lg:hidden" aria-label="Open menu" data-testid="button-open-menu"><Menu size={20} /></button><span className="hidden font-mono-ui text-[10px] uppercase tracking-[.18em] text-[#77798a] sm:block">HMT / 2026 workspace</span></div><div className="flex items-center gap-3"><button onClick={toggleNotices} className="relative rounded-lg p-2 text-[#51546a] hover:bg-[#e9e5da]" aria-label="Notifications" data-testid="button-notifications"><Bell size={18} />{notifCount > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-[#f26a4f] px-1 text-[9px] font-bold text-white">{notifCount > 9 ? '9+' : notifCount}</span>}</button><div className="flex items-center gap-2 border-l border-[#dedbd1] pl-3"><div className="grid h-8 w-8 place-items-center rounded-full bg-[#5aafbd] text-xs font-bold text-[#171a2d]">{user ? initialsOf(user) : '?'}</div><div className="hidden text-left sm:block"><div className="text-xs font-semibold">{user ? displayNameOf(user) : 'Sign in'}</div><div className="font-mono-ui text-[9px] uppercase tracking-wider text-[#77798a]">{user ? user.role.charAt(0) + user.role.slice(1).toLowerCase() : 'Guest'}</div></div><ChevronDown size={14} className="text-[#77798a]" /></div>{user && <button onClick={handleLogout} className="flex items-center gap-1.5 rounded-lg border border-[#dedbd1] px-3 py-2 text-xs font-bold text-[#51546a] transition-colors hover:bg-[#e9e5da]" aria-label="Log out" data-testid="button-logout"><LogOut size={14} /><span className="hidden sm:inline">Logout</span></button>}</div></header>
+      {notices && <div className="absolute right-5 top-[64px] z-20 w-80 rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-4 shadow-xl lg:right-10"><div className="flex items-center justify-between"><b className="text-sm">Inbox{notifCount > 0 && <span className="ml-2 rounded-full bg-[#f26a4f] px-2 py-0.5 text-[10px] font-bold text-white">{notifCount} new</span>}</b><div className="flex items-center gap-2">{notifCount > 0 && <button onClick={readAllNotifs} className="text-[11px] font-semibold text-[#5aafbd] underline">Mark all read</button>}<button onClick={() => setNotices(false)} aria-label="Close inbox" data-testid="button-close-inbox"><X size={15} /></button></div></div>{notifLoading ? <p className="mt-3 text-xs text-[#77798a]">Loading…</p> : notifList.length ? <div className="mt-2 max-h-80 space-y-2 overflow-y-auto">{notifList.map((n:any)=><button key={n.id} onClick={()=>openNotif(n)} className={"w-full rounded-xl border p-3 text-left " + (n.read ? "border-[#e5e1d7] bg-white" : "border-[#f26a4f]/40 bg-[#fff7ea]")}><div className="flex items-center gap-2 text-xs font-bold">{!n.read && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#f26a4f]" />}{n.title}</div>{n.body && <p className="mt-1 text-[11px] leading-5 text-[#55586a]">{n.body}</p>}<div className="mt-1 font-mono-ui text-[9px] text-[#aaa9a2]">{n.createdAt ? new Date(n.createdAt).toLocaleString() : ''}{n.link ? ' · tap to open' : ''}</div></button>)}</div> : <p className="mt-3 text-xs leading-relaxed text-[#77798a]">You're all caught up — team requests and updates will appear here.</p>}</div>}
       <div className="mx-auto max-w-[1440px] px-5 py-8 lg:px-10 lg:py-10">{children}</div>
     </main>
   </div>;
@@ -482,7 +524,8 @@ function AppRoutes() { return <Switch>
 <Route path="/participant/my-hackathons">{() => <RequireParticipant><MyHackathons /></RequireParticipant>}</Route>
 <Route path="/participant/teams">{() => <RequireParticipant><ParticipantTeams /></RequireParticipant>}</Route>
 <Route path="/participant/projects">{() => <RequireParticipant><ParticipantProjects /></RequireParticipant>}</Route>
-<Route path="/participant/ai">{() => <RequireParticipant><ParticipantAI /></RequireParticipant>}</Route>
+<Route path="/participant/my-hackathons/:id/ai">{() => <RequireParticipant><ParticipantHackathonAI /></RequireParticipant>}</Route>
+<Route path="/participant/ai">{() => <RequireParticipant><LegacyAIRedirect /></RequireParticipant>}</Route>
 <Route path="/participant/github">{() => <RequireParticipant><ParticipantGithub /></RequireParticipant>}</Route>
 <Route path="/participant/performance">{() => <RequireParticipant><ParticipantPerformance /></RequireParticipant>}</Route>
 <Route path="/participant/learning">{() => <RequireParticipant><ParticipantLearning /></RequireParticipant>}</Route>

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 export interface AuditEvent {
   eventId: string;
   timestamp: string; // ISO
@@ -13,33 +15,65 @@ export interface AuditEvent {
   metadata?: Record<string, unknown> | null;
 }
 
-// Secret redaction for audit metadata - reuse logic from observability but explicit here too
-const SENSITIVE_KEYS = new Set([
-  'password',
-  'accessToken',
-  'refreshToken',
-  'secret',
-  'DATABASE_URL',
-  'NEO4J_PASSWORD',
-  'REDIS_URL',
-  'JWT_ACCESS_SECRET',
-  'JWT_REFRESH_SECRET',
-]);
+// Secret redaction for audit metadata - reuse logic from observability but explicit here too.
+// Matching is case-insensitive and covers snake_case variants; nested objects/arrays redacted recursively.
+const SENSITIVE_KEY_PATTERNS = [
+  /password/i,
+  /passwd/i,
+  /pwd/i,
+  /access_?token/i,
+  /refresh_?token/i,
+  /(^|_)token(s)?$/i,
+  /secret/i,
+  /api[_-]?key/i,
+  /client[_-]?secret/i,
+  /private[_-]?key/i,
+  /github[_-]?token/i,
+  /authorization/i,
+  /database_?url/i,
+  /neo4j_?password/i,
+  /redis_?url/i,
+  /jwt_.*secret/i,
+  /sync_.*secret/i,
+];
+
+function isSensitiveKey(key: string): boolean {
+  return SENSITIVE_KEY_PATTERNS.some((re) => re.test(key));
+}
+
+function redactDeep(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactDeep);
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = isSensitiveKey(k) ? '[REDACTED]' : redactDeep(v);
+    }
+    return out;
+  }
+  return value;
+}
 
 export function redactAuditMetadata(
   metadata: Record<string, unknown> | null | undefined,
 ): Record<string, unknown> | null {
-  if (!metadata) return null;
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(metadata)) {
-    out[k] = SENSITIVE_KEYS.has(k) ? '[REDACTED]' : v;
-  }
-  return out;
+  if (metadata == null) return null;
+  if (typeof metadata !== 'object' || Array.isArray(metadata)) return null;
+  return redactDeep(metadata) as Record<string, unknown>;
 }
 
 export function buildAuditEvent(params: Omit<AuditEvent, 'eventId' | 'timestamp'> & Partial<Pick<AuditEvent, 'eventId' | 'timestamp'>>): AuditEvent {
+  if (!params || typeof params !== 'object') throw new Error('Invalid audit event: params required');
+  if (typeof params.action !== 'string' || params.action.length === 0) {
+    throw new Error('Invalid audit event: action must be a non-empty string');
+  }
+  if (typeof params.resourceType !== 'string' || params.resourceType.length === 0) {
+    throw new Error('Invalid audit event: resourceType must be a non-empty string');
+  }
+  if (params.outcome !== 'success' && params.outcome !== 'failure') {
+    throw new Error('Invalid audit event: outcome must be success|failure');
+  }
   return {
-    eventId: params.eventId ?? `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    eventId: params.eventId ?? `evt_${randomUUID()}`,
     timestamp: params.timestamp ?? new Date().toISOString(),
     actorId: params.actorId ?? null,
     actorRole: params.actorRole ?? null,

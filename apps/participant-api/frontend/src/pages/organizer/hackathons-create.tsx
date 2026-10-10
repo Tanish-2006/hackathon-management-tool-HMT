@@ -64,6 +64,7 @@ export default function OrganizerHackathonsCreate(){
     partRequired:['TITLE','DESCRIPTION'] as string[],
     partTeamSubmission:true, partLateAllowed:false,
     partMaxSubs:'' as string,
+    partRepoRequirement:'OPTIONAL' as 'REQUIRED'|'OPTIONAL'|'DISABLED',
   });
   const [themes, setThemes] = useState<any[]>([]);
   const [resources, setResources] = useState<any[]>([]);
@@ -97,6 +98,7 @@ export default function OrganizerHackathonsCreate(){
         partTeamSubmission: saved.submission?.teamSubmission ?? f.partTeamSubmission,
         partLateAllowed: saved.submission?.lateAllowed ?? f.partLateAllowed,
         partMaxSubs: saved.submission?.maxSubmissions ?? '',
+        partRepoRequirement: saved.repoRequirement ?? f.partRepoRequirement,
       }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -552,6 +554,7 @@ export default function OrganizerHackathonsCreate(){
           eligibility: form.partEligibility,
           approval: form.partApproval,
           participantLimit: limit === '' ? null : Number(limit),
+          repoRequirement: form.partRepoRequirement,
           submission: {
             required: form.partRequired,
             teamSubmission: teamsOn ? Boolean(form.partTeamSubmission) : false,
@@ -770,7 +773,7 @@ export default function OrganizerHackathonsCreate(){
                           </div>
                         </form>
                       ) : (
-                        <div key={p.id} className="flex justify-between rounded-xl border border-[#e5e1d7] bg-white px-3 py-2 text-xs"><span className="min-w-0"><b>#{p.order} {p.name}</b> · {new Date(p.startsAt).toLocaleDateString()} → {new Date(p.endsAt).toLocaleDateString()}{p.description ? <span className="block text-[#77798a] line-clamp-1">{p.description}</span> : null}</span><span className="flex items-center gap-2"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${p.status==='ACTIVE'?'bg-[#d8e35b] text-[#171a2d]':'bg-[#f4f1e8]'}`}>{p.status}</span><button onClick={()=>startEdit(p)} disabled={loading} className="rounded-lg border border-[#dedbd1] px-2 py-1 text-[11px] font-bold hover:bg-[#f4f1e8] disabled:opacity-50">Edit</button><button onClick={()=>deletePhase(p.id, p.name)} disabled={loading} className="rounded-lg border border-[#dedbd1] px-2 py-1 text-[11px] font-bold text-[#d74635] hover:bg-[#f4f1e8] disabled:opacity-50">Delete</button></span></div>
+                        <div key={p.id} className="flex justify-between rounded-xl border border-[#e5e1d7] bg-white px-3 py-2 text-xs"><span className="min-w-0"><b>#{p.order} {p.name}</b> · {new Date(p.startsAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} → {new Date(p.endsAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}{p.description ? <span className="block text-[#77798a] line-clamp-1">{p.description}</span> : null}</span><span className="flex items-center gap-2"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${p.status==='ACTIVE'?'bg-[#d8e35b] text-[#171a2d]':'bg-[#f4f1e8]'}`}>{p.status}</span><button onClick={()=>startEdit(p)} disabled={loading} className="rounded-lg border border-[#dedbd1] px-2 py-1 text-[11px] font-bold hover:bg-[#f4f1e8] disabled:opacity-50">Edit</button><button onClick={()=>deletePhase(p.id, p.name)} disabled={loading} className="rounded-lg border border-[#dedbd1] px-2 py-1 text-[11px] font-bold text-[#d74635] hover:bg-[#f4f1e8] disabled:opacity-50">Delete</button></span></div>
                       )
                     ))}
                     {phases.length===0 && <div className="text-xs text-[#77798a]">No phases yet. Add registration → results.</div>}
@@ -857,6 +860,15 @@ export default function OrganizerHackathonsCreate(){
                     <Field label="Max submissions (empty = unlimited)"><input type="number" min={1} step={1} value={form.partMaxSubs} onChange={e=>update('partMaxSubs',e.target.value)} placeholder="e.g. 3" className="hmt-input mt-0"/></Field>
                   </div>
 
+                  <Field label="Is a GitHub repository URL required for each team?">
+                    <select value={form.partRepoRequirement} onChange={e=>update('partRepoRequirement',e.target.value)} className="hmt-input mt-0">
+                      <option value="OPTIONAL">Optional — teams may add one primary repo URL</option>
+                      <option value="REQUIRED">Required — each team must provide one primary repo URL</option>
+                      <option value="DISABLED">Not used — no repository URL field for this hackathon</option>
+                    </select>
+                    <span className="mt-1 block text-[11px] text-[#77798a]">One primary URL per team, set by the leader. A URL never grants repository access — grants stay explicit.</span>
+                  </Field>
+
                   <div className="rounded-xl bg-[#f4f1e8] p-3 text-xs leading-5 text-[#77798a]">
                     Submission deadline comes from the timeline (Step 6)
                     {(() => { const sub = phases.find((p:any)=>p.name==='submission'); return sub ? `: ${new Date(sub.endsAt).toLocaleDateString()} ${new Date(sub.endsAt).toLocaleTimeString()}` : ' — no submission phase configured yet'; })()}
@@ -884,7 +896,7 @@ export default function OrganizerHackathonsCreate(){
                         <div className="rounded-xl bg-white border border-[#e5e1d7] p-3"><b>Resources</b><div className="mt-1 text-[#77798a]">{resources.length} added</div></div>
                         <div className="rounded-xl bg-white border border-[#e5e1d7] p-3"><b>Timeline</b><div className="mt-1 text-[#77798a]">{phases.length} phases</div></div>
                         <div className="rounded-xl bg-white border border-[#e5e1d7] p-3"><b>Criteria</b><div className="mt-1 text-[#77798a]">{criteria.length} criteria · weights {Math.round(criteria.reduce((s:number,c:any)=>s+(Number(c.weight)||0),0)*100)}% / 100%</div></div>
-                        <div className="rounded-xl bg-white border border-[#e5e1d7] p-3"><b>Participation</b><div className="mt-1 text-[#77798a]">{((hackathon as any)?.metadata?.draft?.participation) ? `Configured (${(hackathon as any).metadata.draft.participation.mode})` : 'Not configured'}</div></div>
+                        <div className="rounded-xl bg-white border border-[#e5e1d7] p-3"><b>Participation</b><div className="mt-1 text-[#77798a]">{((hackathon as any)?.metadata?.draft?.participation) ? `Configured (${(hackathon as any).metadata.draft.participation.mode})` : 'Not configured'}</div>{((hackathon as any)?.metadata?.draft?.participation?.repoRequirement) && <div className="mt-1 text-[#77798a]">Repo URL: {(hackathon as any).metadata.draft.participation.repoRequirement}</div>}</div>
                         <div className="rounded-xl bg-white border border-[#e5e1d7] p-3"><b>Mentors</b><div className="mt-1 text-[#77798a]">{mentorAssignments.length} assignments (optional, managed in workspace)</div></div>
                       </div>
                       {(() => {

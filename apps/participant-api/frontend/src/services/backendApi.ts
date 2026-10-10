@@ -267,9 +267,16 @@ export const hmtBackendService = {
     const res = await fetchWithAuth(`/hackathons/my${qs}`); return unwrap<any>(res);
   },
   async getMyRegistrations(): Promise<any> { const res = await fetchWithAuth('/hackathons/registrations/me'); return unwrap<any>(res); },
-  async getAiAccessStatus(projectId?: string): Promise<any> {
-    const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
-    const res = await fetchWithAuth(`/ai/access-status${qs}`); return unwrap<any>(res);
+  // Sync recovery: ask the participant backend to pull the organizer outbox
+  // (server defaults for organizer address + shared secret apply). Used when
+  // discovery is unexpectedly empty — never fabricates records.
+  async pullSync(limit = 50): Promise<any> { const res = await fetchWithAuth('/sync/pull', { method: 'POST', body: JSON.stringify({ limit }) }); return unwrap<any>(res); },
+  async getAiAccessStatus(projectId?: string, hackathonId?: string): Promise<any> {
+    const params = new URLSearchParams({
+      ...(projectId ? { projectId } : {}),
+      ...(hackathonId ? { hackathonId } : {}),
+    }).toString();
+    const res = await fetchWithAuth(`/ai/access-status${params ? `?${params}` : ''}`); return unwrap<any>(res);
   },
 
   // ---------- Profile & SkillProfile ----------
@@ -281,8 +288,11 @@ export const hmtBackendService = {
     catch { const res = await fetchWithAuth('/skill-profile', { method: 'POST', body: JSON.stringify(data) }); return unwrap<any>(res); }
   },
 
-  // ---------- Teams ----------
-  async getMyTeam(): Promise<any> { const res = await fetchWithAuth('/team/me'); return unwrap<any>(res); },
+  // ---------- Teams (hackathon-scoped: pass hackathonId to stay in context) ----------
+  async getMyTeam(hackathonId?: string): Promise<any> {
+    const qs = hackathonId ? `?hackathonId=${encodeURIComponent(hackathonId)}` : '';
+    const res = await fetchWithAuth(`/team/me${qs}`); return unwrap<any>(res);
+  },
   async createTeam(teamData: any): Promise<any> { const res = await fetchWithAuth('/team', { method: 'POST', body: JSON.stringify(teamData) }); return unwrap<any>(res); },
   async discoverTeams(params: Record<string,string>={}): Promise<any> {
     const qs = new URLSearchParams(params).toString();
@@ -294,7 +304,34 @@ export const hmtBackendService = {
     const res = await fetchWithAuth(`/team/match/candidates${qs}`); return unwrap<any>(res);
   },
   async joinTeam(teamId: string): Promise<any> { const res = await fetchWithAuth('/team/join', { method: 'POST', body: JSON.stringify({ teamId }) }); return unwrap<any>(res); },
-  async leaveTeam(): Promise<any> { const res = await fetchWithAuth('/team/leave', { method: 'POST', body: JSON.stringify({}) }); return unwrap<any>(res); },
+  async joinByCode(data: { teamName: string; tid: string; hackathonId: string }): Promise<any> { const res = await fetchWithAuth('/team/join-by-code', { method: 'POST', body: JSON.stringify(data) }); return unwrap<any>(res); },
+  // Join requests (leader-approved; TID-less path)
+  async requestToJoinTeam(teamId: string, data: { message?: string; skillRole?: string; skillLanguages?: string; skillExperience?: string; skillContribution?: string } = {}): Promise<any> { const res = await fetchWithAuth('/team/join-requests', { method: 'POST', body: JSON.stringify({ teamId, ...data }) }); return unwrap<any>(res); },
+  async getMyJoinRequests(): Promise<any> { const res = await fetchWithAuth('/team/join-requests/me'); return unwrap<any>(res); },
+  async getTeamJoinRequests(teamId: string): Promise<any> { const res = await fetchWithAuth(`/team/${teamId}/join-requests`); return unwrap<any>(res); },
+  async acceptJoinRequest(requestId: string): Promise<any> { const res = await fetchWithAuth(`/team/join-requests/${requestId}/accept`, { method: 'POST', body: JSON.stringify({}) }); return unwrap<any>(res); },
+  async rejectJoinRequest(requestId: string): Promise<any> { const res = await fetchWithAuth(`/team/join-requests/${requestId}/reject`, { method: 'POST', body: JSON.stringify({}) }); return unwrap<any>(res); },
+  // Leave requests (member → leader approval; no immediate removal)
+  async requestToLeaveTeam(teamId: string): Promise<any> { const res = await fetchWithAuth('/team/leave-requests', { method: 'POST', body: JSON.stringify({ teamId }) }); return unwrap<any>(res); },
+  async getMyLeaveRequests(): Promise<any> { const res = await fetchWithAuth('/team/leave-requests/me'); return unwrap<any>(res); },
+  async getTeamLeaveRequests(teamId: string): Promise<any> { const res = await fetchWithAuth(`/team/${teamId}/leave-requests`); return unwrap<any>(res); },
+  async acceptLeaveRequest(requestId: string): Promise<any> { const res = await fetchWithAuth(`/team/leave-requests/${requestId}/accept`, { method: 'POST', body: JSON.stringify({}) }); return unwrap<any>(res); },
+  async rejectLeaveRequest(requestId: string): Promise<any> { const res = await fetchWithAuth(`/team/leave-requests/${requestId}/reject`, { method: 'POST', body: JSON.stringify({}) }); return unwrap<any>(res); },
+  async cancelLeaveRequest(requestId: string): Promise<any> { const res = await fetchWithAuth(`/team/leave-requests/${requestId}/cancel`, { method: 'POST', body: JSON.stringify({}) }); return unwrap<any>(res); },
+  // Notifications (persisted inbox; drives the bell badge)
+  async getNotifications(): Promise<any> { const res = await fetchWithAuth('/notifications'); return unwrap<any>(res); },
+  async getUnreadCount(): Promise<any> { const res = await fetchWithAuth('/notifications/unread-count'); return unwrap<any>(res); },
+  async markNotificationRead(id: string): Promise<any> { const res = await fetchWithAuth(`/notifications/${id}/read`, { method: 'POST', body: JSON.stringify({}) }); return unwrap<any>(res); },
+  async markAllNotificationsRead(): Promise<any> { const res = await fetchWithAuth('/notifications/read-all', { method: 'POST', body: JSON.stringify({}) }); return unwrap<any>(res); },
+  async transferLeadership(teamId: string, toUserId: string): Promise<any> { const res = await fetchWithAuth(`/team/${teamId}/transfer`, { method: 'POST', body: JSON.stringify({ toUserId }) }); return unwrap<any>(res); },
+  async deleteTeam(teamId: string): Promise<any> { const res = await fetchWithAuth(`/team/${teamId}`, { method: 'DELETE' }); return unwrap<any>(res); },
+  async leaveTeam(hackathonId?: string, teamId?: string): Promise<any> {
+    const params = new URLSearchParams({
+      ...(hackathonId ? { hackathonId } : {}),
+      ...(teamId ? { teamId } : {}),
+    }).toString();
+    const res = await fetchWithAuth(`/team/leave${params ? `?${params}` : ''}`, { method: 'POST', body: JSON.stringify({}) }); return unwrap<any>(res);
+  },
   async getMyInvitations(): Promise<any> { const res = await fetchWithAuth('/team/invitations/me'); return unwrap<any>(res); },
   async acceptInvitation(inviteId: string): Promise<any> { const res = await fetchWithAuth(`/team/invitations/${inviteId}/accept`, { method: 'POST', body: JSON.stringify({}) }); return unwrap<any>(res); },
   async declineInvitation(inviteId: string): Promise<any> { const res = await fetchWithAuth(`/team/invitations/${inviteId}/decline`, { method: 'POST', body: JSON.stringify({}) }); return unwrap<any>(res); },
@@ -302,8 +339,11 @@ export const hmtBackendService = {
   async expressInterest(teamId: string, message?: string): Promise<any> { const res = await fetchWithAuth(`/team/${teamId}/interest`, { method: 'POST', body: JSON.stringify({ message }) }); return unwrap<any>(res); },
   async getTeamInterests(teamId: string): Promise<any> { const res = await fetchWithAuth(`/team/${teamId}/interests`); return unwrap<any>(res); },
 
-  // ---------- Projects ----------
-  async getMyProject(): Promise<any> { const res = await fetchWithAuth('/project/me'); return unwrap<any>(res); },
+  // ---------- Projects (hackathon-scoped: pass hackathonId to stay in context) ----------
+  async getMyProject(hackathonId?: string): Promise<any> {
+    const qs = hackathonId ? `?hackathonId=${encodeURIComponent(hackathonId)}` : '';
+    const res = await fetchWithAuth(`/project/me${qs}`); return unwrap<any>(res);
+  },
   async createProject(data: any): Promise<any> { const res = await fetchWithAuth('/project', { method: 'POST', body: JSON.stringify(data) }); return unwrap<any>(res); },
   async updateProject(id: string, data: any): Promise<any> { const res = await fetchWithAuth(`/project/${id}`, { method: 'PUT', body: JSON.stringify(data) }); return unwrap<any>(res); },
   async getProjectById(id: string): Promise<any> { const res = await fetchWithAuth(`/project/${id}`); return unwrap<any>(res); },
@@ -312,19 +352,34 @@ export const hmtBackendService = {
   async connectRepo(repoData: any): Promise<any> { const res = await fetchWithAuth('/team/repository', { method: 'POST', body: JSON.stringify(repoData) }); return unwrap<any>(res); },
   async connectRepositoryAccess(data: any): Promise<any> { const res = await fetchWithAuth('/repository-access/connect', { method: 'POST', body: JSON.stringify(data) }); return unwrap<any>(res); },
 
-  // ---------- AI Teammate (real backend via backendApi) ----------
-  async askAITeammate(message: string, opts?: { projectId?: string; conversationId?: string }): Promise<any> {
-    const res = await fetchWithAuth('/ai/chat', { method: 'POST', body: JSON.stringify({ message, projectId: opts?.projectId, conversationId: opts?.conversationId }) });
+  // ---------- AI Teammate (hackathon-scoped: pass hackathonId so one
+  // hackathon's team/project is never used to authorize another's) ----------
+  async askAITeammate(message: string, opts?: { projectId?: string; conversationId?: string; hackathonId?: string }): Promise<any> {
+    const res = await fetchWithAuth('/ai/chat', { method: 'POST', body: JSON.stringify({ message, projectId: opts?.projectId, conversationId: opts?.conversationId, hackathonId: opts?.hackathonId }) });
     return unwrap<any>(res);
   },
   async getAIRecommendations(): Promise<any> { const res = await fetchWithAuth('/ai/recommendations'); return unwrap<any>(res); },
-  async getAIConversations(): Promise<any> { const res = await fetchWithAuth('/ai/conversations'); return unwrap<any>(res); },
+  async getAIConversations(projectId?: string, hackathonId?: string): Promise<any> {
+    const params = new URLSearchParams({
+      ...(projectId ? { projectId } : {}),
+      ...(hackathonId ? { hackathonId } : {}),
+    }).toString();
+    const res = await fetchWithAuth(`/ai/conversations${params ? `?${params}` : ''}`);
+    return unwrap<any>(res);
+  },
   async getAIConversation(id: string): Promise<any> { const res = await fetchWithAuth(`/ai/conversations/${id}`); return unwrap<any>(res); },
-  async createAIConversation(data: { title?: string; initialMessage: string; projectId?: string }): Promise<any> { const res = await fetchWithAuth('/ai/conversations', { method: 'POST', body: JSON.stringify(data) }); return unwrap<any>(res); },
-  async postAIConversationMessage(conversationId: string, message: string, projectId?: string): Promise<any> { const res = await fetchWithAuth(`/ai/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ message, projectId }) }); return unwrap<any>(res); },
-  async createAnalysisJob(projectId: string, type?: string): Promise<any> { const res = await fetchWithAuth('/ai/analysis-jobs', { method: 'POST', body: JSON.stringify({ projectId, type }) }); return unwrap<any>(res); },
+  async createAIConversation(data: { title?: string; initialMessage: string; projectId?: string; hackathonId?: string }): Promise<any> { const res = await fetchWithAuth('/ai/conversations', { method: 'POST', body: JSON.stringify(data) }); return unwrap<any>(res); },
+  async postAIConversationMessage(conversationId: string, message: string, projectId?: string, hackathonId?: string): Promise<any> { const res = await fetchWithAuth(`/ai/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ message, projectId, hackathonId }) }); return unwrap<any>(res); },
+  async createAnalysisJob(projectId: string, type?: string, hackathonId?: string): Promise<any> { const res = await fetchWithAuth('/ai/analysis-jobs', { method: 'POST', body: JSON.stringify({ projectId, type, hackathonId }) }); return unwrap<any>(res); },
   async getAnalysisJob(id: string): Promise<any> { const res = await fetchWithAuth(`/ai/analysis-jobs/${id}`); return unwrap<any>(res); },
-  async listAnalysisJobs(): Promise<any> { const res = await fetchWithAuth('/ai/analysis-jobs'); return unwrap<any>(res); },
+  async listAnalysisJobs(projectId?: string, hackathonId?: string): Promise<any> {
+    const params = new URLSearchParams({
+      ...(projectId ? { projectId } : {}),
+      ...(hackathonId ? { hackathonId } : {}),
+    }).toString();
+    const res = await fetchWithAuth(`/ai/analysis-jobs${params ? `?${params}` : ''}`);
+    return unwrap<any>(res);
+  },
 
   // ---------- GitHub (real backend via backendApi) ----------
   async getGitHubAuthUrl(): Promise<{ authorizationUrl: string; provider?: string }> {
@@ -355,7 +410,10 @@ export const hmtBackendService = {
   async getFindings(): Promise<any> { const res = await fetchWithAuth('/repository/findings'); return unwrap<any>(res); },
 
   // ---------- Performance & Feedback ----------
-  async getTimeline(): Promise<any> { const res = await fetchWithAuth('/performance/timeline'); return unwrap<any>(res); },
+  async getTimeline(projectId?: string): Promise<any> {
+    const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+    const res = await fetchWithAuth(`/performance/timeline${qs}`); return unwrap<any>(res);
+  },
   async getPerformanceFeedback(projectId?: string): Promise<any> {
     const qs = projectId ? `?projectId=${projectId}` : '';
     const res = await fetchWithAuth(`/performance/feedback${qs}`); return unwrap<any>(res);
@@ -376,9 +434,15 @@ export const hmtBackendService = {
     const qs = projectId ? `?projectId=${projectId}` : '';
     const res = await fetchWithAuth(`/performance/improvement-areas${qs}`); return unwrap<any>(res);
   },
-  async getPerformanceHistory(): Promise<any> { const res = await fetchWithAuth('/performance/history'); return unwrap<any>(res); },
+  async getPerformanceHistory(projectId?: string): Promise<any> {
+    const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+    const res = await fetchWithAuth(`/performance/history${qs}`); return unwrap<any>(res);
+  },
   async getPerformanceHistoryByProject(projectId: string): Promise<any> { const res = await fetchWithAuth(`/performance/history/${projectId}`); return unwrap<any>(res); },
-  async getEliminationAnalysis(): Promise<any> { const res = await fetchWithAuth('/performance/elimination-analysis'); return unwrap<any>(res); },
+  async getEliminationAnalysis(projectId?: string): Promise<any> {
+    const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+    const res = await fetchWithAuth(`/performance/elimination-analysis${qs}`); return unwrap<any>(res);
+  },
 
   // ---------- Post-hackathon ----------
   async getRoadmap(): Promise<any> { const res = await fetchWithAuth('/post-hackathon/roadmap', { method: 'POST', body: JSON.stringify({}) }); return unwrap<any>(res); },

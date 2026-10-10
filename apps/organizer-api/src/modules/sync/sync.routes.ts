@@ -1,10 +1,29 @@
-import { FastifyInstance } from 'fastify';
+import { timingSafeEqual, createHash } from 'crypto';
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { resolveSyncSecret } from '@hmt/config';
 import { syncService } from './sync.service';
 import { createAuthGuard, getUser } from '../../shared/guards/auth.guard';
 import type { JwtConfig } from '@hmt/security';
 
+function presentSyncSecret(req: FastifyRequest): boolean {
+  const presented = req.headers['x-sync-secret'];
+  const expected = resolveSyncSecret();
+  if (typeof presented !== 'string' || presented.length === 0 || expected.length === 0) return false;
+  const a = createHash('sha256').update(presented).digest();
+  const b = createHash('sha256').update(expected).digest();
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 export async function syncRoutes(app: FastifyInstance, opts: { jwtConfig: JwtConfig }) {
   const authGuard = createAuthGuard(opts.jwtConfig);
+  // Server-to-server read guard: the participant backend pulls the outbox
+  // with SYNC_SHARED_SECRET and holds no organizer user JWT. Fall back to
+  // the JWT guard for human callers. Secret comparison is constant-time and
+  // fail-closed when the secret is unset.
+  const syncReadGuard = async (req: FastifyRequest, reply: FastifyReply) => {
+    if (presentSyncSecret(req)) return;
+    return authGuard(req, reply);
+  };
 
   app.get('/hackathons/:id/published-event', { preHandler: [authGuard] }, async (req, reply) => {
     const { id } = req.params as any;
@@ -41,15 +60,20 @@ export async function syncRoutes(app: FastifyInstance, opts: { jwtConfig: JwtCon
     return reply.send({ data: syncService.getContractSchema() });
   });
 
-  app.get('/sync/published', { preHandler: [authGuard] }, async (_req, reply) => {
+  app.get('/sync/published', { preHandler: [syncReadGuard] }, async (_req, reply) => {
     const events = await syncService.listPublishedEvents();
     return reply.send({ data: events });
   });
 
   // Canonical outbox feed — participant backend polls this (same contract, idempotent by eventId).
-  app.get('/sync/outbox', { preHandler: [authGuard] }, async (req, reply) => {
+  app.get('/sync/outbox', { preHandler: [syncReadGuard] }, async (req, reply) => {
     const { limit } = (req.query as any) ?? {};
-    const events = await syncService.listOutbox(limit ? Number(limit) : 100);
+    const parsed = limit === undefined ? 100 : Number(limit);
+    const safeLimit =
+      Number.isFinite(parsed) && parsed > 0
+        ? Math.min(Math.floor(parsed), 500)
+        : 100;
+    const events = await syncService.listOutbox(safeLimit);
     return reply.send({ data: events });
   });
 

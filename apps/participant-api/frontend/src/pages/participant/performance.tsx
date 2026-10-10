@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Trophy, MessageSquare, AlertTriangle, Target, TrendingUp, Calendar, Award, Eye, Loader2, AlertCircle, X, Check, BarChart3, Lightbulb, FileX2, Star } from 'lucide-react';
 import { hmtBackendService, ApiError } from '@/services/backendApi';
+import { useHackathonContext } from '@/hooks/use-hackathon-context';
 import { Link } from 'wouter';
 
 function friendly(e:unknown){ return e instanceof ApiError? e.message : (e as Error)?.message || 'Failed' }
@@ -24,20 +25,38 @@ export default function ParticipantPerformance(){
   const [error,setError]=useState<string|null>(null);
   const [activeTab,setActiveTab]=useState<'timeline'|'feedback'|'evaluations'|'mistakes'>('timeline');
 
+  // Hackathon-scoped context: per-project endpoints accept a projectId, so
+  // resolve this hackathon's project first and filter by it. Timeline,
+  // history and elimination remain team-global on the backend (documented
+  // limitation) — they are shown only with their project attribution.
+  const ctx = useHackathonContext();
+  const contextId = ctx.selectedId;
+
   useEffect(()=>{
+    if(ctx.loading) { setLoading(true); return; }
     let m=true;
     async function load(){
       setLoading(true); setError(null);
       try{
+        // Resolve this hackathon's project for scoped queries. Timeline,
+        // history and elimination accept the same project scope.
+        let projectId: string | undefined;
+        if(contextId){
+          try{
+            const p = await hmtBackendService.getMyProject(contextId);
+            const proj = (p as any)?.project ?? p;
+            if(proj?.id) projectId = proj.id;
+          }catch{ /* teamless — global fallback below */ }
+        }
         const [tl, fb, ev, mi, ph, imp, hi, el] = await Promise.allSettled([
-          hmtBackendService.getTimeline(),
-          hmtBackendService.getPerformanceFeedback(),
-          hmtBackendService.getPerformanceEvaluations(),
-          hmtBackendService.getPerformanceMistakes(),
-          hmtBackendService.getPerformancePhaseProgress(),
-          hmtBackendService.getImprovementAreas(),
-          hmtBackendService.getPerformanceHistory(),
-          hmtBackendService.getEliminationAnalysis(),
+          hmtBackendService.getTimeline(projectId),
+          hmtBackendService.getPerformanceFeedback(projectId),
+          hmtBackendService.getPerformanceEvaluations(projectId),
+          hmtBackendService.getPerformanceMistakes(projectId),
+          hmtBackendService.getPerformancePhaseProgress(projectId),
+          hmtBackendService.getImprovementAreas(projectId),
+          hmtBackendService.getPerformanceHistory(projectId),
+          hmtBackendService.getEliminationAnalysis(projectId),
         ]);
         if(!m) return;
         if(tl.status==='fulfilled') setTimeline(tl.value as any);
@@ -60,7 +79,7 @@ export default function ParticipantPerformance(){
       finally{ if(m) setLoading(false); }
     }
     load(); return ()=>{m=false}
-  },[]);
+  },[ctx.loading, contextId]);
 
   if(loading) return <div className="space-y-4"><div className="h-24 animate-pulse rounded-2xl bg-[#e9e5da]"/><div className="h-64 animate-pulse rounded-2xl bg-[#e9e5da]"/></div>
   if(error) return <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-700 flex gap-2"><AlertCircle size={16}/>{error}<button onClick={()=>setError(null)} className="ml-auto"><X size={14}/></button></div>
@@ -80,6 +99,29 @@ export default function ParticipantPerformance(){
           <span className="rounded-full bg-[#171a2d] px-3 py-1.5 text-xs font-bold text-white flex items-center gap-1"><Trophy size={14}/> Avg {avgScore}</span>
           <span className="rounded-full bg-[#d8e35b] px-3 py-1.5 text-xs font-bold text-[#171a2d]">{evals.length} evaluations</span>
         </div>
+      </div>
+
+      {/* Hackathon context: filtered panels follow this hackathon's project */}
+      <div className="rounded-xl border border-[#dedbd1] bg-[#f4f1e8] px-4 py-2.5 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        {ctx.loading ? (
+          <span className="text-xs text-[#77798a]">Loading hackathon context…</span>
+        ) : !contextId ? (
+          <span className="text-xs text-[#55586a]">No hackathon context — <Link href="/participant/hackathons" className="font-bold underline">register in Discover</Link> to track progress.</span>
+        ) : (
+          <>
+            <label className="flex items-center gap-2 text-xs font-semibold text-[#55586a]">Hackathon
+              <select
+                value={contextId}
+                onChange={e=>ctx.select(e.target.value || null)}
+                className="rounded-lg border border-[#dedbd1] bg-white px-2 py-1.5 text-xs font-bold text-[#171a2d] outline-none"
+                aria-label="Select hackathon context"
+              >
+                {ctx.options.map(o=><option key={o.id} value={o.id}>{o.title}{o.registered?'':' (not registered)'}</option>)}
+              </select>
+            </label>
+            <span className="text-[11px] text-[#77798a]">Feedback, evaluations, mistakes, phase progress, timeline, history & elimination filtered to this hackathon&apos;s project.</span>
+          </>
+        )}
       </div>
 
       {/* KPI */}

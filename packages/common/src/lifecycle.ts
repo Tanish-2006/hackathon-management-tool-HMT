@@ -65,7 +65,10 @@ export function deriveLifecycleStatus(
   input: LifecycleInput,
   now: Date = new Date(),
 ): DerivedHackathonStatus {
-  const status = String(input.status || 'DRAFT').toUpperCase();
+  // Fail closed on null/undefined input (JS callers) — never throw on read path.
+  if (!input || typeof input !== 'object') return 'DRAFT';
+  const rawStatus = (input as { status?: unknown }).status;
+  const status = String(typeof rawStatus === 'string' && rawStatus.trim() ? rawStatus.trim() : 'DRAFT').toUpperCase();
   if (
     status === 'DRAFT' ||
     status === 'REVIEW' ||
@@ -75,26 +78,36 @@ export function deriveLifecycleStatus(
     return status as DerivedHackathonStatus;
   }
   if (status !== 'PUBLISHED' && status !== 'IS_PUBLISHED') {
-    // Unknown persisted value — treat non-published as draft-safe, published-like as PUBLISHED.
-    return 'PUBLISHED';
+    // Unknown persisted value — fail closed to draft-safe (never expose unknown states publicly).
+    return 'DRAFT';
   }
 
-  const nowMs = now.getTime();
+  const nowMs = now instanceof Date ? now.getTime() : NaN;
+  // Invalid clock input — cannot safely derive windows; fail closed to PUBLISHED
+  // only when explicitly published, otherwise DRAFT. PUBLISHED without windows
+  // is the minimal public state (no CTA inference).
+  if (Number.isNaN(nowMs)) return 'PUBLISHED';
+
   const regStart = toTime(input.registrationStart);
   const regEnd = toTime(input.registrationEnd);
-  const evtStart = toTime(input.eventStart ?? input.startDate);
-  const evtEnd = toTime(input.eventEnd ?? input.endDate);
-  const phases = Array.isArray(input.phases) ? input.phases : [];
+  // Empty-string aliases must fall back to legacy fields (?? would keep "").
+  const evtStart = toTime(input.eventStart || input.startDate);
+  const evtEnd = toTime(input.eventEnd || input.endDate);
+  const rawPhases = Array.isArray(input.phases) ? input.phases : [];
+  // Guard null/undefined elements (Array.isArray does not validate items).
+  const phases = rawPhases.filter((p): p is NonNullable<(typeof rawPhases)[number]> => p != null && typeof p === 'object');
 
   // Active phase name drives SUBMISSION / EVALUATION override while LIVE.
   const activePhase = phases.find(
-    (p) => String(p.status || '').toUpperCase() === 'ACTIVE',
+    (p) => String(p.status || '').trim().toUpperCase() === 'ACTIVE',
   );
   const activeName = String(activePhase?.name || '').toLowerCase();
 
   // 1. Registration window (Unstop/Hack2Skill pattern: explicit reg deadline drives CTA).
   if (regStart != null && nowMs < regStart) return 'PUBLISHED';
   if (regStart != null && regEnd != null) {
+    // Guard inverted window (misconfig): start > end — fail closed to PUBLISHED.
+    if (regStart > regEnd) return 'PUBLISHED';
     if (nowMs >= regStart && nowMs <= regEnd) return 'REGISTRATION_OPEN';
     // after registration closes but before event starts
     if (nowMs > regEnd && (evtStart == null || nowMs < evtStart))
@@ -102,9 +115,16 @@ export function deriveLifecycleStatus(
   } else if (regEnd != null) {
     if (nowMs <= regEnd) return 'REGISTRATION_OPEN';
     if (evtStart == null || nowMs < evtStart) return 'REGISTRATION_CLOSED';
+  } else if (regStart != null) {
+    // Open-ended registration (start only, no deadline): OPEN once started.
+    if (nowMs >= regStart) return 'REGISTRATION_OPEN';
   }
 
   // 2. Event window → LIVE (+ phase overrides).
+  // Guard inverted event window.
+  if (evtStart != null && evtEnd != null && evtStart > evtEnd) {
+    return regEnd != null && nowMs > regEnd ? 'REGISTRATION_CLOSED' : 'PUBLISHED';
+  }
   if (evtStart != null && evtEnd != null) {
     if (nowMs < evtStart) {
       // No registration window configured → distinguish upcoming vs reg-closed.
@@ -115,6 +135,17 @@ export function deriveLifecycleStatus(
       if (activeName.includes('evalua')) return 'EVALUATION';
       return 'LIVE';
     }
+    if (nowMs > evtEnd) return 'COMPLETED';
+  } else if (evtStart != null && evtEnd == null) {
+    // Half-open: start only — LIVE once started, otherwise upcoming/registration-closed.
+    if (nowMs < evtStart) {
+      return regEnd != null ? 'REGISTRATION_CLOSED' : 'PUBLISHED';
+    }
+    if (activeName.includes('submis')) return 'SUBMISSION';
+    if (activeName.includes('evalua')) return 'EVALUATION';
+    return 'LIVE';
+  } else if (evtStart == null && evtEnd != null) {
+    // Half-open: end only — COMPLETED once past end.
     if (nowMs > evtEnd) return 'COMPLETED';
   }
 
@@ -173,7 +204,11 @@ export function bucketForMyHackathons(
   )
     return 'live';
   if (derived === 'COMPLETED' || derived === 'ARCHIVED') return 'completed';
-  if (derived === 'PUBLISHED' || derived === 'REGISTRATION_OPEN')
+  if (
+    derived === 'PUBLISHED' ||
+    derived === 'REGISTRATION_OPEN' ||
+    derived === 'REGISTRATION_CLOSED'
+  )
     return 'upcoming';
   return 'registered';
 }

@@ -32,6 +32,9 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   private members = new Map<string, any>(); // memberId -> member
   private teamInvitations = new Map<string, any>();
   private teamInterests = new Map<string, any>();
+  private teamJoinRequests = new Map<string, any>(); // requestId -> join request
+  private teamLeaveRequests = new Map<string, any>(); // requestId -> leave request
+  private notifications = new Map<string, any>(); // notificationId -> notification
   private projects = new Map<string, any>(); // teamId -> project
   private projectsById = new Map<string, any>(); // projectId -> project
   private projectMilestones = new Map<string, any>();
@@ -772,7 +775,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
           this.hackathons.set(id, updated);
           return updated;
         }
-        // @ts-ignore delegate to create
+        // delegate to create
         return (this as any).hackathon.create({ data: create });
       },
     };
@@ -952,6 +955,16 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         const rec = { id, ...data, joinedAt: new Date() };
         this.members.set(id, rec);
         return rec;
+      },
+      update: async ({ where, data }: any) => {
+        for (const [k, v] of this.members.entries()) {
+          if (where.id && v.id === where.id) {
+            const updated = { ...v, ...data };
+            this.members.set(k, updated);
+            return updated;
+          }
+        }
+        return null;
       },
       delete: async ({ where }: any) => {
         for (const [k, v] of this.members.entries()) {
@@ -1190,8 +1203,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   }
 
   // ---------- TeamInterest ----------
-  get teamInterest() {
-    return {
+  get teamInterest() {    return {
       create: async ({ data }: any) => {
         const id = `interest_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
         const rec = { id, ...data, createdAt: new Date() };
@@ -1231,6 +1243,182 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
           }
         }
         return null;
+      },
+    };
+  }
+
+  // ---------- TeamJoinRequest (participant → team requests, leader-approved) ----------
+  // Statuses: PENDING, APPROVED, REJECTED. Skill answers ride on the record
+  // and are only ever returned by the leader-only list endpoint.
+  get teamJoinRequest() {
+    return {
+      create: async ({ data }: any) => {
+        const id = `req_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const rec = {
+          id,
+          ...data,
+          status: data.status ?? 'PENDING',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        this.teamJoinRequests.set(id, rec);
+        return rec;
+      },
+      findUnique: async ({ where }: any) =>
+        this.teamJoinRequests.get(where.id) || null,
+      findFirst: async ({ where }: any = {}) => {
+        for (const v of this.teamJoinRequests.values()) {
+          let match = true;
+          if (where.id && v.id !== where.id) match = false;
+          if (where.teamId && v.teamId !== where.teamId) match = false;
+          if (where.userId && v.userId !== where.userId) match = false;
+          if (where.status && v.status !== where.status) match = false;
+          if (where.hackathonId && v.hackathonId !== where.hackathonId) match = false;
+          if (match) return v;
+        }
+        return null;
+      },
+      findMany: async ({ where }: any = {}) => {
+        let arr = Array.from(this.teamJoinRequests.values());
+        if (where?.teamId) arr = arr.filter((r: any) => r.teamId === where.teamId);
+        if (where?.userId) arr = arr.filter((r: any) => r.userId === where.userId);
+        if (where?.status) arr = arr.filter((r: any) => r.status === where.status);
+        if (where?.hackathonId) arr = arr.filter((r: any) => r.hackathonId === where.hackathonId);
+        return arr;
+      },
+      update: async ({ where, data }: any) => {
+        const rec = this.teamJoinRequests.get(where.id);
+        if (!rec) return null;
+        const updated = { ...rec, ...data, updatedAt: new Date() };
+        this.teamJoinRequests.set(where.id, updated);
+        return updated;
+      },
+      deleteMany: async (args: any = {}) => {
+        const where = args?.where ?? args ?? {};
+        let count = 0;
+        for (const [k, v] of Array.from(this.teamJoinRequests.entries())) {
+          let match = true;
+          if (where.teamId && v.teamId !== where.teamId) match = false;
+          if (where.userId && v.userId !== where.userId) match = false;
+          if (match) {
+            this.teamJoinRequests.delete(k);
+            count++;
+          }
+        }
+        return { count };
+      },
+    };
+  }
+
+  // ---------- TeamLeaveRequest (member → leader: leaving needs approval) ----------
+  // Same lifecycle shape as join requests. Membership is NOT removed on
+  // creation — only the leader's accept removes it.
+  get teamLeaveRequest() {
+    return {
+      create: async ({ data }: any) => {
+        const id = `lvr_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const rec = {
+          id,
+          ...data,
+          status: data.status ?? 'PENDING',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        this.teamLeaveRequests.set(id, rec);
+        return rec;
+      },
+      findUnique: async ({ where }: any) =>
+        this.teamLeaveRequests.get(where.id) || null,
+      findFirst: async ({ where }: any = {}) => {
+        for (const v of this.teamLeaveRequests.values()) {
+          let match = true;
+          if (where.id && v.id !== where.id) match = false;
+          if (where.teamId && v.teamId !== where.teamId) match = false;
+          if (where.userId && v.userId !== where.userId) match = false;
+          if (where.status && v.status !== where.status) match = false;
+          if (where.hackathonId && v.hackathonId !== where.hackathonId) match = false;
+          if (match) return v;
+        }
+        return null;
+      },
+      findMany: async ({ where }: any = {}) => {
+        let arr = Array.from(this.teamLeaveRequests.values());
+        if (where?.teamId) arr = arr.filter((r: any) => r.teamId === where.teamId);
+        if (where?.userId) arr = arr.filter((r: any) => r.userId === where.userId);
+        if (where?.status) arr = arr.filter((r: any) => r.status === where.status);
+        if (where?.hackathonId) arr = arr.filter((r: any) => r.hackathonId === where.hackathonId);
+        return arr;
+      },
+      update: async ({ where, data }: any) => {
+        const rec = this.teamLeaveRequests.get(where.id);
+        if (!rec) return null;
+        const updated = { ...rec, ...data, updatedAt: new Date() };
+        this.teamLeaveRequests.set(where.id, updated);
+        return updated;
+      },
+      deleteMany: async (args: any = {}) => {
+        const where = args?.where ?? args ?? {};
+        let count = 0;
+        for (const [k, v] of Array.from(this.teamLeaveRequests.entries())) {
+          let match = true;
+          if (where.teamId && v.teamId !== where.teamId) match = false;
+          if (where.userId && v.userId !== where.userId) match = false;
+          if (match) {
+            this.teamLeaveRequests.delete(k);
+            count++;
+          }
+        }
+        return { count };
+      },
+    };
+  }
+
+  // ---------- Notification (persisted user inbox; drives the bell icon) ----------
+  // Types: JOIN_REQUESTED, JOIN_APPROVED, JOIN_REJECTED, LEAVE_REQUESTED,
+  // LEAVE_APPROVED, LEAVE_REJECTED. Callers dedupe on (userId, type,
+  // requestId) so retries never produce duplicate inbox rows.
+  get notification() {
+    return {
+      create: async ({ data }: any) => {
+        const id = `ntf_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const rec = {
+          id,
+          ...data,
+          read: data.read ?? false,
+          createdAt: new Date(),
+          readAt: null,
+        };
+        this.notifications.set(id, rec);
+        return rec;
+      },
+      findUnique: async ({ where }: any) =>
+        this.notifications.get(where.id) || null,
+      findFirst: async ({ where }: any = {}) => {
+        for (const v of this.notifications.values()) {
+          let match = true;
+          if (where.id && v.id !== where.id) match = false;
+          if (where.userId && v.userId !== where.userId) match = false;
+          if (where.type && v.type !== where.type) match = false;
+          if (where.requestId && v.requestId !== where.requestId) match = false;
+          if (where.read !== undefined && v.read !== where.read) match = false;
+          if (match) return v;
+        }
+        return null;
+      },
+      findMany: async ({ where }: any = {}) => {
+        let arr = Array.from(this.notifications.values());
+        if (where?.userId) arr = arr.filter((n: any) => n.userId === where.userId);
+        if (where?.type) arr = arr.filter((n: any) => n.type === where.type);
+        if (where?.read !== undefined) arr = arr.filter((n: any) => n.read === where.read);
+        arr.sort((a: any, b: any) => +new Date(b.createdAt) - +new Date(a.createdAt));
+        return arr;
+      },
+      update: async ({ where, data }: any) => {
+        const rec = this.notifications.get(where.id);
+        if (!rec) return null;
+        const updated = { ...rec, ...data };
+        this.notifications.set(where.id, updated);
+        return updated;
       },
     };
   }

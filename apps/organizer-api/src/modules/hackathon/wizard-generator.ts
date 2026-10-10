@@ -155,7 +155,15 @@ export function buildWizardSections(input: WizardInput, variant = 0): WizardSect
   const wantsProblems = type === 'PROBLEM_STATEMENT_BASED' || type === 'HYBRID';
   const problemStatements = wantsProblems ? problemStatementsFor(about, audience, input.mode, variant) : [];
   const problemLine = wantsProblems ? ` Problem statements: ${problemStatements[0] ?? ''}` : '';
-  const rules = RULE_VARIANTS[variant % RULE_VARIANTS.length];
+  // Copy the variant array — RULE_VARIANTS is module-shared; mutating it would
+  // leak organizer notes across requests (cross-hackathon data leak).
+  // Normalize variant (negative/float/NaN-safe) so any input maps to a valid row.
+  const variantCount = RULE_VARIANTS.length;
+  const variantIdx = Number.isFinite(variant)
+    ? ((Math.floor(variant) % variantCount) + variantCount) % variantCount
+    : 0;
+  const baseRules = RULE_VARIANTS[variantIdx] ?? [];
+  const rules = [...baseRules];
   if (requirements) rules.push(`Organizer notes: ${requirements.slice(0, 300)}`);
   return {
     title,
@@ -176,7 +184,7 @@ export function buildWizardSections(input: WizardInput, variant = 0): WizardSect
       'Submit before the deadline — late submissions are not evaluated.',
     ],
     codeOfConduct: [...CODE_OF_CONDUCT],
-    timeline: TIMELINE,
+    timeline: TIMELINE.map((t) => ({ ...t })),
     evaluationCriteria: [
       { name: 'Innovation', description: 'Novelty of the solution', weight: 0.34 },
       { name: 'Technical implementation', description: 'Code quality and execution', weight: 0.33 },

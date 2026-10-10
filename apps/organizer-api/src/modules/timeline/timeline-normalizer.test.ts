@@ -75,4 +75,102 @@ describe('timeline-normalizer', () => {
     expect(parseDurationToMs('soon')).toBeNull();
     expect(parseDurationToMs(undefined)).toBeNull();
   });
+
+  it('48-hour event: development gets the largest share, no zero-duration, touching, in-window', () => {
+    const start = '2026-10-08T09:00:00.000Z';
+    const end = '2026-10-10T09:00:00.000Z'; // exactly 48h
+    const names = ['registration', 'team_formation', 'ideation', 'development', 'submission', 'evaluation', 'finale'];
+    const out = normalizeTimeline(
+      start,
+      end,
+      names.map((name, i) => ({ name, order: i + 1, description: null })),
+    );
+    expect(out).toHaveLength(7);
+    expect(out[0].startsAt).toBe(start);
+    expect(out[6].endsAt).toBe(end);
+    const durations = out.map((p) => new Date(p.endsAt).getTime() - new Date(p.startsAt).getTime());
+    for (const d of durations) expect(d).toBeGreaterThan(0);
+    // Development (index 3) strictly largest.
+    expect(durations[3]).toBe(Math.max(...durations));
+    expect(durations[3]).toBeGreaterThan(durations[0]);
+    expect(durations[3]).toBeGreaterThan(durations[4]);
+    // Sequential touching boundaries, correct order.
+    expect(out.map((p) => p.order)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    for (let i = 1; i < out.length; i++) {
+      expect(new Date(out[i].startsAt).getTime()).toBe(new Date(out[i - 1].endsAt).getTime());
+    }
+    expect(verifyTimelineInWindow(start, end, out)).toBeNull();
+  });
+
+  it('short 9-hour event: every phase keeps start < end with hour/minute precision', () => {
+    const start = '2026-10-08T09:00:00.000Z';
+    const end = '2026-10-08T18:00:00.000Z';
+    const names = ['registration', 'team_formation', 'ideation', 'development', 'submission', 'evaluation', 'finale'];
+    const out = normalizeTimeline(
+      start,
+      end,
+      names.map((name, i) => ({ name, order: i + 1, description: null })),
+    );
+    expect(out).toHaveLength(7);
+    for (const p of out) {
+      expect(new Date(p.startsAt).getTime()).toBeLessThan(new Date(p.endsAt).getTime());
+    }
+    // No two phases share the same calendar day slice only — durations differ by weight.
+    const durations = out.map((p) => new Date(p.endsAt).getTime() - new Date(p.startsAt).getTime());
+    expect(new Set(durations).size).toBeGreaterThan(1);
+    expect(verifyTimelineInWindow(start, end, out)).toBeNull();
+  });
+
+  it('long 7-day event: all phases inside window, first starts at window start, last ends at window end', () => {
+    const start = '2026-10-08T09:00:00.000Z';
+    const end = '2026-10-15T09:00:00.000Z';
+    const out = normalizeTimeline(start, end, specs(7));
+    expect(out[0].startsAt).toBe(start);
+    expect(out[6].endsAt).toBe(end);
+    for (const p of out) {
+      expect(new Date(p.startsAt).getTime()).toBeGreaterThanOrEqual(new Date(start).getTime());
+      expect(new Date(p.endsAt).getTime()).toBeLessThanOrEqual(new Date(end).getTime());
+    }
+    expect(verifyTimelineInWindow(start, end, out)).toBeNull();
+  });
+
+  it('unknown/custom phase names get default weight and still validate', () => {
+    const out = normalizeTimeline(W0, W1, [
+      { name: 'custom_kickoff', order: 1 },
+      { name: 'DEVELOPMENT', order: 2 },
+      { name: 'Something Else', order: 3 },
+    ]);
+    expect(out).toHaveLength(3);
+    const dev = out.find((p) => p.order === 2)!;
+    const other = out.find((p) => p.order === 1)!;
+    const devDur = new Date(dev.endsAt).getTime() - new Date(dev.startsAt).getTime();
+    const otherDur = new Date(other.endsAt).getTime() - new Date(other.startsAt).getTime();
+    expect(devDur).toBeGreaterThan(otherDur);
+    expect(verifyTimelineInWindow(W0, W1, out)).toBeNull();
+  });
+
+  it('rejects windows too small to give every phase start < end', () => {
+    expect(() =>
+      normalizeTimeline('2026-10-08T09:00:00.000Z', '2026-10-08T09:00:00.003Z', specs(7)),
+    ).toThrow(/too small/i);
+  });
+
+  it('generated phases never overlap and manual edits stay authoritative (verify rejects overlap/zero-duration)', () => {
+    const start = '2026-10-08T09:00:00.000Z';
+    const end = '2026-10-10T09:00:00.000Z';
+    const out = normalizeTimeline(
+      start,
+      end,
+      ['registration', 'development', 'submission'].map((name, i) => ({ name, order: i + 1 })),
+    );
+    // A manual edit that creates an overlap is rejected.
+    const overlapped = [
+      { ...out[0], order: 1 },
+      { ...out[1], order: 2, startsAt: out[0].startsAt },
+    ];
+    expect(verifyTimelineInWindow(start, end, overlapped)).toMatch(/overlap/i);
+    // A manual zero-duration edit is rejected.
+    const zeroed = [{ order: 1, startsAt: start, endsAt: start }];
+    expect(verifyTimelineInWindow(start, end, zeroed)).toMatch(/before endsAt/i);
+  });
 });

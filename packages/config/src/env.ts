@@ -39,8 +39,17 @@ const baseEnvSchema = z.object({
   // Organizer → participant sync push target (base URL incl. /api/v1).
   PARTICIPANT_API_URL: z.string().default('http://localhost:3000/api/v1'),
 
+  // Participant → organizer sync pull target (base URL incl. /api/v1).
+  // Used by participant POST /sync/pull defaults so recovery does not
+  // require the frontend to know the organizer address.
+  ORGANIZER_API_URL: z.string().default('http://localhost:3002/api/v1'),
+
   // Shared secret authenticating organizer → participant sync calls.
   // Empty disables push (publish still succeeds locally). Never logged.
+  // NOTE: guards and sync clients resolve the effective secret via
+  // resolveSyncSecret() below, which substitutes a well-known DEV default
+  // outside production so local development syncs with zero configuration.
+  // Production stays fail-closed (empty) — set a real secret there.
   SYNC_SHARED_SECRET: z.string().default(''),
 
   // CORS
@@ -102,4 +111,28 @@ export function validateEnv<T extends z.ZodTypeAny>(schema: T, env: NodeJS.Proce
 
 export function loadBaseEnv(env: NodeJS.ProcessEnv = process.env): BaseEnv {
   return validateEnv(baseEnvSchema, env);
+}
+
+/**
+ * Well-known development-only sync secret. Lets organizer ↔ participant
+ * sync work on a fresh checkout with no .env. MUST be overridden in
+ * production (see .env.example); production resolves to '' (fail-closed).
+ */
+export const DEV_SYNC_SECRET = 'hmt-dev-sync-secret-change-in-production';
+
+/**
+ * Effective organizer ↔ participant sync secret. Explicit configuration
+ * always wins; otherwise non-production environments fall back to the
+ * dev default, production falls back to '' (sync disabled, fail-closed).
+ * Every guard/client/pusher must use this — never read the raw env var.
+ */
+export function resolveSyncSecret(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = env.SYNC_SHARED_SECRET;
+  if (typeof configured === 'string' && configured.length > 0) return configured;
+  return env.NODE_ENV === 'production' ? '' : DEV_SYNC_SECRET;
+}
+
+/** True when the effective sync secret is the dev default (warn at boot). */
+export function isDevSyncSecret(env: NodeJS.ProcessEnv = process.env): boolean {
+  return resolveSyncSecret(env) === DEV_SYNC_SECRET;
 }

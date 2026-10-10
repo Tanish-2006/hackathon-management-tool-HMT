@@ -13,7 +13,7 @@
     "test:unit": "vitest run",
     "test:watch": "vitest",
     "start": "node dist/main.js",
-    "dev": "tsx src/main.ts"
+    "dev": "tsx --env-file=.env src/main.ts"
   },
   "dependencies": {
     "@hmt/ai": "workspace:*",

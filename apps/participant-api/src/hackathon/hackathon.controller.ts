@@ -21,7 +21,8 @@ import {
 
 // Sub-resource endpoints must not leak DRAFT/REVIEW/CONFIRMED records when an
 // ID is guessed — same visibility rule as the detail endpoint itself.
-function assertPublishedForParticipants(h: any): void {
+// Exported for regression tests (published-only discovery contract).
+export function assertPublishedForParticipants(h: any): void {
   const st = h.status ?? (h.isPublished ? 'PUBLISHED' : 'DRAFT');
   if (!['PUBLISHED', 'ARCHIVED'].includes(st)) {
     throw new NotFoundException('Hackathon not found');
@@ -243,7 +244,7 @@ export class HackathonController {
    * POST /hackathons/:id/register { teamChoice, teamId? }
    */
   @Post(':id/register')
-  async register(@Req() req: any, @Param('id') id: string, @Body() body: { teamChoice?: string; teamId?: string }) {
+  async register(@Req() req: any, @Param('id') id: string, @Body() body: { teamChoice?: string; teamId?: string; eligibilityAccepted?: boolean }) {
     const h = await this.prisma.hackathon.findUnique({ where: { id } } as any);
     if (!h) throw new NotFoundException('Hackathon not found');
 
@@ -289,13 +290,36 @@ export class HackathonController {
     if (!['create', 'join', 'later'].includes(teamChoice)) {
       throw new BadRequestException('Invalid teamChoice (create|join|later)');
     }
+
+    // Eligibility confirmation when the organizer configured requirements.
+    if (Array.isArray(h.eligibility) && h.eligibility.length > 0 && body?.eligibilityAccepted !== true) {
+      throw new BadRequestException('Please confirm the eligibility requirements to register');
+    }
+
+    // Client-supplied teamId is never trusted: it must exist, belong to this
+    // hackathon, and include the caller as a member.
+    let teamId: string | null = null;
+    if (body?.teamId) {
+      const team: any = await this.prisma.team.findUnique({ where: { id: body.teamId } } as any).catch(() => null);
+      const memberOf = team
+        ? await this.prisma.teamMember.findFirst({
+            where: { teamId: team.id, userId: req.user.id },
+          } as any).catch(() => null)
+        : null;
+      if (!team || team.hackathonId !== id || !memberOf) {
+        throw new BadRequestException('Invalid team choice for this hackathon');
+      }
+      teamId = team.id;
+    }
+
     return (this.prisma as any).registration.create({
       data: {
         hackathonId: id,
         userId: req.user.id,
         status: 'REGISTERED',
         teamChoice,
-        teamId: body?.teamId ?? null,
+        teamId,
+        eligibilityAccepted: body?.eligibilityAccepted === true,
         skillSnapshot: {
           programmingLanguages: skill.programmingLanguages ?? [],
           frameworks: skill.frameworks ?? [],

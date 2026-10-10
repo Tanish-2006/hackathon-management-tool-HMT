@@ -88,16 +88,20 @@ export class AesGcmEncryptionProvider implements TokenEncryptionProvider {
   private readonly keySource: string;
 
   constructor(key?: Buffer | string) {
-    if (key) {
+    if (key !== undefined && key !== null && !(typeof key === 'string' && key.length === 0)) {
       this.key = typeof key === 'string' ? decodeKey(key) : key;
       this.keySource = 'explicit';
+    } else if (typeof key === 'string' && key.length === 0) {
+      throw new Error('Invalid encryption key: explicit empty string is not allowed (use undefined for env resolution)');
     } else {
       this.key = resolveKey();
       this.keySource = process.env.GITHUB_TOKEN_ENCRYPTION_KEY
         ? 'GITHUB_TOKEN_ENCRYPTION_KEY'
         : process.env.ENCRYPTION_KEY
           ? 'ENCRYPTION_KEY'
-          : 'fallback';
+          : process.env.CREDENTIAL_ENCRYPTION_KEY
+            ? 'CREDENTIAL_ENCRYPTION_KEY'
+            : 'fallback';
     }
     if (this.key.length !== 32) throw new Error('AES-256-GCM requires 32-byte key');
   }
@@ -116,10 +120,15 @@ export class AesGcmEncryptionProvider implements TokenEncryptionProvider {
   decrypt(ciphertext: string): string {
     if (!ciphertext) return ciphertext;
     if (!this.isEncrypted(ciphertext)) return ciphertext; // if not encrypted, return as-is (migration compatibility)
-    // Try to decrypt; if fails, treat as plaintext (for backward compat with unencrypted legacy tokens)
+    // Authenticated decryption — fail closed on tampering/wrong key.
+    // Legacy plaintext that happens to look like base64 is indistinguishable
+    // from ciphertext; callers must track encryption state explicitly rather
+    // than relying on this heuristic for new writes.
+    const buf = Buffer.from(ciphertext, 'base64');
+    if (buf.length < 12 + 16 + 1) {
+      throw new Error('Decryption failed: ciphertext too short (possible tampering or wrong key)');
+    }
     try {
-      const buf = Buffer.from(ciphertext, 'base64');
-      if (buf.length < 12 + 16 + 1) return ciphertext;
       const iv = buf.subarray(0, 12);
       const tag = buf.subarray(12, 28);
       const enc = buf.subarray(28);
@@ -128,16 +137,28 @@ export class AesGcmEncryptionProvider implements TokenEncryptionProvider {
       const dec = Buffer.concat([decipher.update(enc), decipher.final()]);
       return dec.toString('utf8');
     } catch {
-      // If decrypt fails, return ciphertext as-is to avoid crash; caller should handle via sanitize
-      return ciphertext;
+      throw new Error('Decryption failed: authentication failed (wrong key or tampered ciphertext)');
     }
   }
 
   isEncrypted(value: string): boolean {
     if (!value || typeof value !== 'string') return false;
     // Heuristic: encrypted values are base64, length > 40, and decode to iv+tag+ciphertext
-    // Tokens like mock_github_token_* or ghp_* are NOT base64 of correct structure
-    if (value.startsWith('mock_') || value.startsWith('ghp_') || value.startsWith('gho_') || value.startsWith('github_pat_')) return false;
+    // Tokens like mock_github_token_* or ghp_* are NOT base64 of correct structure.
+    // Blocklist covers common plaintext prefixes so they are never mistaken for ciphertext.
+    const lower = value.toLowerCase();
+    if (
+      value.startsWith('mock_') ||
+      value.startsWith('ghp_') || value.startsWith('gho_') ||
+      value.startsWith('ghu_') || value.startsWith('ghs_') || value.startsWith('ghr_') ||
+      value.startsWith('github_pat_') ||
+      value.startsWith('sk-') || value.startsWith('sk-ant-') ||
+      value.startsWith('xoxb-') || value.startsWith('xoxp-') ||
+      value.startsWith('AKIA') ||
+      lower.startsWith('bearer ') ||
+      lower.startsWith('-----begin')
+    )
+      return false;
     try {
       const buf = Buffer.from(value, 'base64');
       // Must be at least 12+16+1 and base64 round-trip stable
@@ -177,22 +198,47 @@ export function isTokenEncrypted(value: string): boolean {
  */
 const TOKEN_PATTERNS: RegExp[] = [
   /mock_github_token_[a-zA-Z0-9_-]+/g,
-  /ghp_[a-zA-Z0-9]{30,}/g,
-  /gho_[a-zA-Z0-9_-]{30,}/g,
-  /github_pat_[a-zA-Z0-9_]{80,}/g,
+  /ghp_[a-zA-Z0-9]{8,}/g,
+  /gho_[a-zA-Z0-9_-]{8,}/g,
+  /ghu_[a-zA-Z0-9_-]{8,}/g,
+  /ghs_[a-zA-Z0-9_-]{8,}/g,
+  /ghr_[a-zA-Z0-9_-]{8,}/g,
+  /github_pat_[a-zA-Z0-9_]{8,}/g,
   /AKIA[0-9A-Z]{16}/g,
+  /ASIA[0-9A-Z]{16}/g,
+  /sk-ant-[a-zA-Z0-9_-]{10,}/g,
   /sk-[a-zA-Z0-9_-]{10,}/g,
-  /Bearer\s+[a-zA-Z0-9._-]+/gi,
+  /xox[bap]-?[a-zA-Z0-9-]+/g,
+  /AIza[0-9A-Za-z_-]{35}/g,
+  /Bearer\s+[a-zA-Z0-9._~+/=-]+/gi,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
 ];
 
 export function sanitizeExceptionMessage(message: string): string {
+  if (typeof message !== 'string') return '[REDACTED: non-string error]';
   let out = message;
   for (const pat of TOKEN_PATTERNS) {
+    // Reset lastIndex for global regexes reused across calls.
+    pat.lastIndex = 0;
     out = out.replace(pat, '[REDACTED]');
   }
   // Also redact if message contains Authorization header value
   out = out.replace(/Authorization:\s*[^\n\r]+/gi, 'Authorization: [REDACTED]');
-  out = out.replace(/accessToken["']?\s*[:=]\s*["'][^"']+["']/gi, 'accessToken=[REDACTED]');
+  // Quoted key=value secrets (accessToken, refreshToken, password, secret, apiKey, …)
+  out = out.replace(
+    /(access_?token|refresh_?token|password|secret|api[_-]?key|client_?secret|private_?key|github_?token)["']?\s*[:=]\s*["'][^"']+["']/gi,
+    '$1=[REDACTED]',
+  );
+  // Unquoted key=value secrets (api_key=abcdef, password=hunter2)
+  out = out.replace(
+    /(access_?token|refresh_?token|password|secret|api[_-]?key|client_?secret)(["']?\s*[:=]\s*)([^\s'";,}\]]+)/gi,
+    '$1=[REDACTED]',
+  );
+  // Connection strings with embedded credentials (postgres://user:pass@host, mongodb+srv://…, redis://…)
+  out = out.replace(
+    /(postgres(ql)?|mysql|mongodb(\+srv)?|redis):\/\/[^\s'"]+/gi,
+    '[REDACTED_CONNECTION_STRING]',
+  );
   return out;
 }
 

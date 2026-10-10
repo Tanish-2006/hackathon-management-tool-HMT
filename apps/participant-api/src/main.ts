@@ -6,11 +6,18 @@ import {
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { randomUUID } from 'node:crypto';
+import { isDevSyncSecret } from '@hmt/config';
 import { AppModule } from './app.module';
 // Workspace foundation compliance: uses shared @hmt/config and @hmt/observability via @hmt/database and @hmt/security (no duplicate auth)
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
+
+  if (isDevSyncSecret()) {
+    logger.warn(
+      'SYNC uses the well-known dev secret (no SYNC_SHARED_SECRET configured). Organizer ↔ participant sync works locally, but set a real SYNC_SHARED_SECRET on both APIs before any production use.',
+    );
+  }
 
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
