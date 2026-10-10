@@ -36,7 +36,7 @@ export default function ParticipantGithub(){
           }
         }
         if(ghMe.status==='fulfilled') setMe(ghMe.value as any);
-        try{ const r = await hmtBackendService.getGitHubRepositories(); setRepos(Array.isArray(r)? r : (r as any)?.repositories || []); }catch{}
+        if(ghMe.status==='fulfilled' && (ghMe.value as any)?.connected){ try{ const r = await hmtBackendService.getGitHubRepositories(); setRepos(Array.isArray(r)? r : (r as any)?.repositories || []); }catch{} }
         try{ const c = await hmtBackendService.getGitHubConnections(); setConnections(Array.isArray(c)? c : (c as any)?.connections || []); }catch{}
       }catch(e){ if(m) setError(friendly(e)); }
       finally{ if(m) setLoading(false); }

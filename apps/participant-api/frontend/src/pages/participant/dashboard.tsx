@@ -45,7 +45,6 @@ export default function ParticipantDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [repoStatus, setRepoStatus] = useState<{ hasAccess: boolean; status?: string } | null>(null);
-  const [aiAccess, setAiAccess] = useState<any>(null);
   const [registration, setRegistration] = useState<any>(null);
 
   useEffect(() => {
@@ -73,7 +72,6 @@ export default function ParticipantDashboard() {
             if(mounted) setRegistration(reg);
             if (reg) hmtBackendService.getTimeline().then((t)=>{ if(mounted) setTimeline(t); }).catch(()=>null);
           }).catch(()=>null);
-          hmtBackendService.getAiAccessStatus().then(r=>{ if(mounted) setAiAccess(r); }).catch(()=>null);
         }
 
         if (t.status === 'fulfilled') {
@@ -123,7 +121,7 @@ export default function ParticipantDashboard() {
           <h1 className="mt-2 text-3xl font-bold tracking-[-.05em] text-[#171a2d] sm:text-[36px]">Your hackathon, in motion.</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-[#77798a]">
             {hackathon
-              ? `${hackathon.derivedStatus ?? 'Published'} · ${registration ? 'Registered' : 'Not registered yet'} · ${hasTeam ? 'In a team' : 'No team yet'} · AI ${aiAccess?.allowed ? 'available' : 'locked'}`
+              ? `${hackathon.derivedStatus ?? 'Published'} · ${registration ? 'Registered' : 'Not registered yet'} · ${hasTeam ? 'In a team' : 'No team yet'}${registration ? ' · AI Helper ready' : ''}`
               : 'Find a hackathon to get started.'}
           </p>
         </div>
@@ -237,7 +235,7 @@ export default function ParticipantDashboard() {
           )}
           <div className="mt-5 grid grid-cols-2 gap-2">
             <Link href="/participant/performance" className="rounded-xl bg-[#fdfbf5] px-3 py-2 text-center text-xs font-bold text-[#171a2d]">View performance</Link>
-            <Link href={isRegistered && hackathon?.id ? `/participant/my-hackathons/${hackathon.id}/ai` : '/participant/my-hackathons'} className="rounded-xl border border-[#3a3e5a] px-3 py-2 text-center text-xs font-bold">Ask AI</Link>
+            <Link href={isRegistered && hackathon?.id ? `/participant/ai-helper?hackathon=${hackathon.id}` : '/participant/hackathons'} className="rounded-xl border border-[#3a3e5a] px-3 py-2 text-center text-xs font-bold">AI Helper</Link>
           </div>
         </DarkCard>
       </div>
