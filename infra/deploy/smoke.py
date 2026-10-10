@@ -7,14 +7,15 @@ from datetime import datetime, timedelta, timezone
 
 
 class Api:
-    def __init__(self, base):
+    def __init__(self, base, origin):
         self.base = base.rstrip("/")
+        self.origin = origin
 
     def call(self, method, path, body=None, token=None, raw=False):
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.base + path, data=data, method=method)
         req.add_header("Content-Type", "application/json")
-        req.add_header("Origin", self.base)
+        req.add_header("Origin", self.origin)
         if token:
             req.add_header("Authorization", f"Bearer {token}")
         try:
@@ -30,8 +31,8 @@ class Api:
 
 
 class Smoke:
-    def __init__(self, base, phase):
-        self.api = Api(base)
+    def __init__(self, base, phase, origin):
+        self.api = Api(base, origin)
         self.phase = phase
         self.stamp = str(int(time.time()))
         self.failures = 0
@@ -154,4 +155,5 @@ class Smoke:
 
 
 if __name__ == "__main__":
-    Smoke(sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1", sys.argv[2] if len(sys.argv) > 2 else "flow").main()
+    args = sys.argv[1:] + [None, None, None]
+    Smoke(args[0] or "http://127.0.0.1", args[1] or "flow", args[2] or "http://68.221.114.148").main()
