@@ -15,6 +15,8 @@ import { PgMapStore } from '@hmt/common';
  * ProjectMilestone, ProjectContinuation, Opportunity, RecommendedResource, RoadmapItem,
  * AIConversation, AIAnalysisJob, AIFinding, AIRecommendation etc.
  */
+const APPEND_ONLY_COLLECTIONS = new Set(['aiMessages', 'auditLogs', 'aiInteractions']);
+
 @Injectable()
 export class PrismaService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
@@ -83,7 +85,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     const maps = Object.entries(this).filter(
       (entry): entry is [string, Map<string, unknown>] => entry[1] instanceof Map,
     );
-    for (const [name, map] of maps) await store.attachMap(name, map);
+    for (const [name, map] of maps) await store.attachMap(name, map, { immutable: APPEND_ONLY_COLLECTIONS.has(name) });
     store.start();
     this.stateStore = store;
     this.logger.log(`PrismaService persisting ${maps.length} collections to Postgres`);
@@ -150,14 +152,11 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         return arr;
       },
       create: async ({ data, include }: any) => {
-        if (data.phoneNumber) {
-          for (const u of this.users.values()) {
-            if (u.phoneNumber === data.phoneNumber) {
-              // Mirror Prisma P2002 unique-violation so callers map it to 409.
-              throw Object.assign(new Error('Unique constraint failed on phoneNumber'), {
-                code: 'P2002',
-              });
-            }
+        for (const u of this.users.values()) {
+          const field =
+            u.email === data.email ? 'email' : data.phoneNumber && u.phoneNumber === data.phoneNumber ? 'phoneNumber' : null;
+          if (field) {
+            throw Object.assign(new Error(`Unique constraint failed on ${field}`), { code: 'P2002' });
           }
         }
         const id =
@@ -808,6 +807,11 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         return null;
       },
       create: async ({ data }: any) => {
+        for (const r of this.registrations.values()) {
+          if (r.userId === data.userId && r.hackathonId === data.hackathonId) {
+            throw Object.assign(new Error('Unique constraint failed on (userId, hackathonId)'), { code: 'P2002' });
+          }
+        }
         const id = data.id ?? `reg_${randomUUID()}`;
         const record = {
           status: 'REGISTERED',
@@ -2383,10 +2387,10 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get aiConversation() {
     return {
       create: async ({ data }: any) => {
-        const id = `conv_${randomUUID()}`;
+        const id = data?.id ?? `conv_${randomUUID()}`;
         const rec = {
-          id,
           ...data,
+          id,
           createdAt: new Date(),
           updatedAt: new Date(),
         };

@@ -6,6 +6,7 @@ type MapTrack = {
   map: Map<string, unknown>;
   persisted: Map<string, string>;
   refs: Map<string, unknown>;
+  immutable: boolean;
 };
 
 type ValueTrack = {
@@ -65,7 +66,7 @@ export class PgMapStore {
     });
   }
 
-  async attachMap<V>(collection: string, map: Map<string, V>): Promise<void> {
+  async attachMap<V>(collection: string, map: Map<string, V>, options: { immutable?: boolean } = {}): Promise<void> {
     await this.ensureSchema();
     const { rows } = await this.pool.query<{ id: string; data: string }>(
       'SELECT id, data::text AS data FROM hmt_state WHERE namespace = $1 AND collection = $2 ORDER BY seq',
@@ -82,7 +83,7 @@ export class PgMapStore {
       persisted.set(id, PgMapStore.serialize(value));
       refs.set(id, value);
     }
-    this.tracked.push({ kind: 'map', collection, map: map as Map<string, unknown>, persisted, refs });
+    this.tracked.push({ kind: 'map', collection, map: map as Map<string, unknown>, persisted, refs, immutable: options.immutable === true });
   }
 
   async attachValue<V>(collection: string, get: () => V, set: (value: V) => void): Promise<void> {
@@ -167,7 +168,7 @@ export class PgMapStore {
     for (const [rawId, value] of track.map) {
       const id = String(rawId);
       seen.add(id);
-      if (!full && track.refs.get(id) === value && track.refs.has(id)) continue;
+      if ((!full || track.immutable) && track.refs.get(id) === value && track.refs.has(id)) continue;
       const data = PgMapStore.serialize(value);
       const remember = () => track.refs.set(id, value);
       if (track.persisted.get(id) === data) remember();

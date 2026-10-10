@@ -42,8 +42,11 @@ export default function OrganizerEvaluations(){
   }
   const edit = async(c:any)=>{
     const name=prompt('Edit name',c.name); if(name===null) return;
+    if(!name.trim()){ setError('Criteria name cannot be empty.'); return; }
     const w=prompt('Weight 0.01-1', String(c.weight)); if(w===null) return;
-    try{ const updated=await organizerApi.updateCriteria(c.id,{name,weight:Number(w)}); setCriteria(prev=>prev.map(x=>x.id===c.id?updated:x)); setSuccess('Updated')}catch(e:any){ setError(e.message)}
+    const weight=Number(w);
+    if(!Number.isFinite(weight) || weight<0.01 || weight>1){ setError('Weight must be a number between 0.01 and 1.'); return; }
+    try{ const updated=await organizerApi.updateCriteria(c.id,{name:name.trim(),weight}); setCriteria(prev=>prev.map(x=>x.id===c.id?updated:x)); setSuccess('Updated')}catch(e:any){ setError(e.message)}
   }
 
   if(initial) return <div className="h-64 animate-pulse rounded-2xl bg-[#e9e5da]"/>
@@ -51,7 +54,7 @@ export default function OrganizerEvaluations(){
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Link href="/organizer/dashboard" className="rounded-xl border border-[#dedbd1] bg-[#fdfbf5] p-2"><ArrowLeft size={16}/></Link>
+        <Link href="/organizer/dashboard" aria-label="Back" title="Back" className="rounded-xl border border-[#dedbd1] bg-[#fdfbf5] p-2"><ArrowLeft size={16}/></Link>
         <div>
                     <h1 className="text-2xl font-bold">Evaluations</h1>
         </div>
@@ -85,8 +88,8 @@ export default function OrganizerEvaluations(){
             {criteria.length ? criteria.map((c:any)=><div key={c.id} className="flex items-center justify-between rounded-xl border border-[#e5e1d7] bg-white px-3 py-2.5">
               <div><div className="text-sm font-bold">{c.name}</div><div className="text-xs text-[#77798a]">{c.description || '—'} · weight {c.weight} · max {c.maxScore}</div></div>
               <div className="flex gap-1">
-                <button onClick={()=>edit(c)} className="rounded-lg border border-[#dedbd1] p-2"><Edit2 size={14}/></button>
-                <button onClick={()=>remove(c.id)} className="rounded-lg border border-[#dedbd1] p-2 text-[#f26a4f]"><Trash2 size={14}/></button>
+                <button onClick={()=>edit(c)} aria-label={`Edit ${c.name}`} title="Edit" className="rounded-lg border border-[#dedbd1] p-2"><Edit2 size={14}/></button>
+                <button onClick={()=>remove(c.id)} aria-label={`Delete ${c.name}`} title="Delete" className="rounded-lg border border-[#dedbd1] p-2 text-[#f26a4f]"><Trash2 size={14}/></button>
               </div>
             </div>) : <div className="rounded-xl bg-[#f4f1e8] p-4 text-xs text-[#77798a]">No criteria yet.</div>}
           </div>

@@ -30,6 +30,7 @@ import {
   LeaveRequestDto,
 } from './dto/team.dto';
 import { VisibilityLevel } from '../common/enums/visibility.enum';
+import { isRegistrationClosed } from '../hackathon/hackathon.controller';
 
 @ApiTags('team')
 @ApiBearerAuth()
@@ -91,6 +92,10 @@ export class TeamController {
     }
   }
 
+  private withMembershipLock<T>(userId: string, teamId: string, fn: () => Promise<T>): Promise<T> {
+    return this.withTeamLock(`user:${userId}`, () => this.withTeamLock(`team:${teamId}`, fn));
+  }
+
   /**
    * Registration-closure lock: after the organizer-configured registration
    * deadline (or archive), team structure is frozen. Determined from
@@ -102,8 +107,7 @@ export class TeamController {
     if (st === 'ARCHIVED') {
       throw new ForbiddenException('Hackathon is archived — team changes are locked');
     }
-    const regEnd = h?.registrationEnd ? new Date(h.registrationEnd).getTime() : null;
-    if (regEnd !== null && !Number.isNaN(regEnd) && Date.now() > regEnd) {
+    if (isRegistrationClosed(h)) {
       throw new ForbiddenException('Registration is closed — team changes are locked');
     }
   }
@@ -604,7 +608,10 @@ export class TeamController {
     if (existingMembership) throw new BadRequestException('Already in a team for this hackathon');
     await this.requireRegistrationForHackathon(req.user.id, team.hackathonId);
     // Serialize capacity check + insert so concurrent accepts cannot overfill.
-    return this.withTeamLock(`team:${invite.teamId}`, async () => {
+    return this.withMembershipLock(req.user.id, invite.teamId, async () => {
+      if (await this.findMembershipInHackathon(req.user.id, team.hackathonId)) {
+        throw new BadRequestException('Already in a team for this hackathon');
+      }
       const members = await this.prisma.teamMember.findMany({
         where: { teamId: invite.teamId },
       } as any);
@@ -655,7 +662,7 @@ export class TeamController {
   @Post()
   async createTeam(@Req() req: any, @Body() dto: CreateTeamDto) {
     // Serialize per user so double-clicks/retries cannot create duplicates.
-    return this.withTeamLock(`user:${req.user.id}`, async () => {
+    return this.withTeamLock(`user:${req.user.id}`, () => this.withTeamLock(`hackathon-teams:${dto.hackathonId}`, async () => {
       const hackathon = await this.requireRegistrationForHackathon(req.user.id, dto.hackathonId);
 
       const existingMembership = await this.findMembershipInHackathon(req.user.id, dto.hackathonId);
@@ -677,11 +684,11 @@ export class TeamController {
       }
 
       // Hackathon team-size limits.
-      const max = dto.maxMembers ?? 4;
+      const cap = (hackathon as any)?.teamSize?.max;
+      const max = dto.maxMembers ?? (typeof cap === 'number' ? Math.min(4, cap) : 4);
       if (!Number.isInteger(max) || max < 2 || max > 12) {
         throw new BadRequestException('Team size must be between 2 and 12');
       }
-      const cap = (hackathon as any)?.teamSize?.max;
       if (typeof cap === 'number' && max > cap) {
         throw new BadRequestException(`Team size exceeds the hackathon limit of ${cap}`);
       }
@@ -736,7 +743,7 @@ export class TeamController {
         },
       } as any);
       return team;
-    });
+    }));
   }
 
   /**
@@ -767,7 +774,7 @@ export class TeamController {
     await this.requireRegistrationForHackathon(req.user.id, team.hackathonId);
     const existingMembership = await this.findMembershipInHackathon(req.user.id, team.hackathonId);
     if (existingMembership) throw new BadRequestException('Already in a team for this hackathon');
-    return this.withTeamLock(`team:${team.id}`, async () => {
+    return this.withMembershipLock(req.user.id, team.id, async () => {
       const alreadyMember = await this.findMembershipInHackathon(req.user.id, team.hackathonId);
       if (alreadyMember) throw new BadRequestException('Already in a team for this hackathon');
       const members = await this.prisma.teamMember.findMany({
@@ -894,7 +901,7 @@ export class TeamController {
       : null;
     if (!hackathon) throw new NotFoundException('Hackathon not found or not published');
     this.assertTeamChangesAllowed(hackathon);
-    return this.withTeamLock(`team:${team.id}`, async () => {
+    return this.withMembershipLock(jr.userId, team.id, async () => {
       const fresh: any = await (this.prisma as any).teamJoinRequest.findUnique({ where: { id: requestId } });
       if (!fresh || fresh.status !== 'PENDING') throw new BadRequestException('Join request no longer pending');
       // Revalidate applicant state inside the lock (registration, duplicates, capacity).

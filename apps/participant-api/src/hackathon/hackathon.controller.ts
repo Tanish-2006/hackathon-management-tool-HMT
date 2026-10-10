@@ -29,6 +29,11 @@ export function assertPublishedForParticipants(h: any): void {
   }
 }
 
+export function isRegistrationClosed(h: any, now = Date.now()): boolean {
+  const end = h?.registrationEnd ? new Date(h.registrationEnd).getTime() : NaN;
+  return !Number.isNaN(end) && now > end;
+}
+
 function toDiscoverRow(h: any) {
   const derived = deriveLifecycleStatus({
     status: h.status ?? (h.isPublished ? 'PUBLISHED' : 'DRAFT'),
@@ -258,6 +263,11 @@ export class HackathonController {
     const st = h.status ?? (h.isPublished ? 'PUBLISHED' : 'DRAFT');
     if (!['PUBLISHED', 'ARCHIVED'].includes(st)) throw new NotFoundException('Hackathon not published');
 
+    const existing = await (this.prisma as any).registration.findFirst({
+      where: { userId: req.user.id, hackathonId: id },
+    });
+    if (existing) return existing;
+
     // Registration window enforcement (backend, not frontend-only).
     const derived = deriveLifecycleStatus({
       status: st,
@@ -270,6 +280,9 @@ export class HackathonController {
     if (derived === 'COMPLETED' || derived === 'ARCHIVED') {
       throw new BadRequestException('Registration closed — hackathon has ended');
     }
+    if (isRegistrationClosed(h)) {
+      throw new BadRequestException('Registration is closed for this hackathon');
+    }
 
     // Skill-profile gate: reuse existing profile, never re-ask.
     const skill = await (this.prisma as any).skillProfile?.findUnique?.({ where: { userId: req.user.id } }).catch(() => null);
@@ -281,11 +294,6 @@ export class HackathonController {
         'Complete your skill profile before registering — we reuse it for eligibility and team matching',
       );
     }
-
-    const existing = await (this.prisma as any).registration.findFirst({
-      where: { userId: req.user.id, hackathonId: id },
-    });
-    if (existing) return existing;
 
     const teamChoice = body?.teamChoice ?? 'later';
     if (!['create', 'join', 'later'].includes(teamChoice)) {
@@ -327,6 +335,9 @@ export class HackathonController {
           experienceLevel: skill.experienceLevel ?? null,
         },
       },
+    }).catch(async (e: any) => {
+      if (e?.code !== 'P2002') throw e;
+      return (this.prisma as any).registration.findFirst({ where: { userId: req.user.id, hackathonId: id } });
     });
   }
 

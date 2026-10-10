@@ -21,6 +21,7 @@ import { Role } from '@prisma/client';
 const OTP_TTL_SEC_DEFAULT = 300;
 const OTP_RESEND_COOLDOWN_SEC_DEFAULT = 60;
 const OTP_MAX_ATTEMPTS_DEFAULT = 5;
+export const REFRESH_REUSE_GRACE_MS = 10_000;
 
 @Injectable()
 export class AuthService {
@@ -223,6 +224,15 @@ export class AuthService {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
+    if (storedToken.isRevoked && (await this.isConcurrentRotation(storedToken))) {
+      return this.generateTokenPair(
+        storedToken.user.id,
+        storedToken.user.email,
+        storedToken.user.role,
+        storedToken.familyId,
+      );
+    }
+
     if (storedToken.isRevoked) {
       this.logger.warn(
         `Refresh token reuse detected for family ${storedToken.familyId}! Revoking all sessions.`,
@@ -248,17 +258,27 @@ export class AuthService {
       throw new UnauthorizedException('Refresh token expired');
     }
 
-    await this.prisma.refreshToken.update({
-      where: { id: storedToken.id },
-      data: { isRevoked: true },
-    });
-
-    return this.generateTokenPair(
+    const pair = await this.generateTokenPair(
       storedToken.user.id,
       storedToken.user.email,
       storedToken.user.role,
       storedToken.familyId,
     );
+    await this.prisma.refreshToken.update({
+      where: { id: storedToken.id },
+      data: { isRevoked: true, rotatedAt: new Date() },
+    });
+    return pair;
+  }
+
+  private async isConcurrentRotation(token: any): Promise<boolean> {
+    const rotatedAt = token.rotatedAt ? new Date(token.rotatedAt).getTime() : NaN;
+    if (Number.isNaN(rotatedAt) || Date.now() - rotatedAt > REFRESH_REUSE_GRACE_MS) return false;
+    if (new Date() > token.expiresAt) return false;
+    const live = await this.prisma.refreshToken.findMany({
+      where: { familyId: token.familyId, isRevoked: false },
+    } as any);
+    return live.length > 0;
   }
 
   async logout(userId: string, rawRefreshToken?: string) {

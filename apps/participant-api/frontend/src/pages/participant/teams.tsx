@@ -575,8 +575,8 @@ export default function ParticipantTeams(){
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h3 className="font-bold flex items-center gap-2"><Compass size={16}/> Discover teams</h3>
           <div className="flex gap-2">
-            <label className="relative"><Search size={14} className="absolute left-2.5 top-2.5 text-[#aaa9a2]"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search teams" className="h-9 w-44 rounded-xl border border-[#dedbd1] bg-white pl-8 pr-3 text-xs outline-none focus:border-[#f26a4f]"/></label>
-            <label className="relative"><Filter size={14} className="absolute left-2.5 top-2.5 text-[#aaa9a2]"/><input value={skill} onChange={e=>setSkill(e.target.value)} placeholder="Skill (React, Python)" className="h-9 w-44 rounded-xl border border-[#dedbd1] bg-white pl-8 pr-3 text-xs outline-none focus:border-[#f26a4f]"/></label>
+            <label className="relative min-w-0 flex-1 sm:flex-none"><Search size={14} className="absolute left-2.5 top-2.5 text-[#aaa9a2]"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search teams" className="h-9 w-full sm:w-44 rounded-xl border border-[#dedbd1] bg-white pl-8 pr-3 text-xs outline-none focus:border-[#f26a4f]"/></label>
+            <label className="relative min-w-0 flex-1 sm:flex-none"><Filter size={14} className="absolute left-2.5 top-2.5 text-[#aaa9a2]"/><input value={skill} onChange={e=>setSkill(e.target.value)} placeholder="Skill (React, Python)" className="h-9 w-full sm:w-44 rounded-xl border border-[#dedbd1] bg-white pl-8 pr-3 text-xs outline-none focus:border-[#f26a4f]"/></label>
           </div>
         </div>
 

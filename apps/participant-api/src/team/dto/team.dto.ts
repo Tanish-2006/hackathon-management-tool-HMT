@@ -13,9 +13,10 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { VisibilityLevel } from '../../common/enums/visibility.enum';
 
 export class CreateTeamDto {
-  @ApiProperty({ example: 'Alpha AI Builders' })
+  @ApiProperty({ example: 'Alpha AI Builders', maxLength: 120 })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(120)
   name: string;
 
   @ApiProperty({ example: 'hack_123456' })

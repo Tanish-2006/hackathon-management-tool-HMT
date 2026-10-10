@@ -159,4 +159,29 @@ describe('Organizer ideation rounds', () => {
     expect(failed.statusCode).toBe(502);
     expect(JSON.parse(failed.body).error.code).toBe('SYNC_FAILED');
   });
+
+  it('delivers rapid round changes in order so the participant app ends on the latest round', async () => {
+    const stored = memoryStore.hackathons.get(hackathonId)!;
+    memoryStore.hackathons.set(hackathonId, { ...stored, status: 'PUBLISHED' });
+    const delivered: number[] = [];
+    let call = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      const round = JSON.parse(String((init as RequestInit).body)).currentRound;
+      await new Promise((resolve) => setTimeout(resolve, call++ === 0 ? 40 : 0));
+      delivered.push(round);
+      return new Response('{}', { status: 200 });
+    });
+    const put = (round: number) =>
+      app.inject({
+        method: 'PUT',
+        url: `/api/v1/hackathons/${hackathonId}/ideation`,
+        headers: auth(orgToken),
+        payload: { ...validConfig(), currentRound: round },
+      });
+    const [first, second] = await Promise.all([put(3), put(4)]);
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(delivered[delivered.length - 1]).toBe(4);
+    expect(memoryStore.hackathons.get(hackathonId)!.ideation!.currentRound).toBe(4);
+  });
 });

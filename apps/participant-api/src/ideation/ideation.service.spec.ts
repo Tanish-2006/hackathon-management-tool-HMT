@@ -1,5 +1,5 @@
 import { defaultIdeationConfig } from '@hmt/contracts';
-import { AI_HELPER_NOT_CONFIGURED, AsiOneClient } from './asi-one.client';
+import { AI_HELPER_NOT_CONFIGURED, AiBusyError, AsiOneClient } from './asi-one.client';
 import { IdeationService, type BuildMessagesInput } from './ideation.service';
 
 const service = new IdeationService({} as any, { configured: true } as any);
@@ -133,5 +133,28 @@ describe('AsiOneClient.stream', () => {
     expect(await collect(client)).toEqual(['Hel', 'lo']);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(fetchSpy.mock.calls[0][0]).toBe('https://api.example/v1/chat/completions');
+  });
+
+  it('caps the wait queue and times out queued requests instead of waiting forever', async () => {
+    let releaseFirst: () => void = () => undefined;
+    jest.spyOn(globalThis, 'fetch').mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          releaseFirst = () => resolve(new Response(sse(['data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n']), { status: 200 }));
+        }),
+    );
+    const client = new AsiOneClient(
+      config({ AI_API_KEY: 'k', AI_MAX_CONCURRENCY: '1', AI_MAX_QUEUE: '1', AI_QUEUE_TIMEOUT_MS: '1000' }),
+    );
+    const first = collect(client);
+    await new Promise((r) => setImmediate(r));
+    const queued = collect(client);
+    await new Promise((r) => setImmediate(r));
+    expect(client.queueDepth).toBe(1);
+    await expect(collect(client)).rejects.toBeInstanceOf(AiBusyError);
+    await expect(queued).rejects.toThrow('timed out');
+    expect(client.queueDepth).toBe(0);
+    releaseFirst();
+    expect(await first).toEqual(['ok']);
   });
 });

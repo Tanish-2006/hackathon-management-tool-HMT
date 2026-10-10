@@ -93,7 +93,7 @@ export default function OrganizerHackathonDetail(){
   return (
     <div className="space-y-8">
       <div className="flex items-center gap-3">
-        <Link href="/organizer/hackathons" className="rounded-xl border border-[#dedbd1] bg-[#fdfbf5] p-2"><ArrowLeft size={16}/></Link>
+        <Link href="/organizer/hackathons" aria-label="Back" title="Back" className="rounded-xl border border-[#dedbd1] bg-[#fdfbf5] p-2"><ArrowLeft size={16}/></Link>
         <div className="min-w-0">
           <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">Hackathon</div>
           <h1 className="text-2xl font-bold tracking-[-.04em] truncate">{hackathon.title}</h1>
