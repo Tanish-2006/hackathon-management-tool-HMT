@@ -122,8 +122,7 @@ export class HackathonService {
       draft = result.draftJson as HackathonDraft;
       if (!draft.title) throw new Error('AI draft missing title');
     } catch (e) {
-      // Fallback to local mock for tests or if gateway fails in mock mode
-      if (process.env.AI_PROVIDER === 'external' && process.env.NODE_ENV === 'production') throw e;
+      console.warn(`AI draft failed, using template draft: ${(e as Error).message}`);
       draft = await this.draftGenerator.generateDraft(input);
     }
 
@@ -278,7 +277,7 @@ export class HackathonService {
       provider = `${result.provider}:${result.model}`;
       if (!base.title) throw new Error('AI draft missing title');
     } catch (e) {
-      if (process.env.AI_PROVIDER === 'external' && process.env.NODE_ENV === 'production') throw e;
+      console.warn(`AI wizard draft failed, using template draft: ${(e as Error).message}`);
       const fallback = new MockAIDraftGenerator({ provider: 'wizard-fallback' });
       base = await fallback.generateDraft({
         hackathonName: workingTitle,

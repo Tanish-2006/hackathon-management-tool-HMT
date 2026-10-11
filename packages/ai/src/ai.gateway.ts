@@ -5,6 +5,7 @@ import { PARTICIPANT_ANALYSIS_SYSTEM_PROMPT, buildParticipantAnalysisUserPrompt 
 import { aiInteractionService } from './evaluation/ai-interaction.service';
 import { randomUUID } from 'node:crypto';
 import { sanitizeForLog } from './ai.types';
+const ORGANIZER_DRAFT_MAX_TOKENS = 4096;
 
 /**
  * AIGateway — high-level facade for business logic.
@@ -29,6 +30,8 @@ export class AIGateway {
         taskType: 'ORGANIZER_DRAFT',
         prompt,
         systemPrompt: ORGANIZER_DRAFT_SYSTEM_PROMPT,
+        maxTokens: ORGANIZER_DRAFT_MAX_TOKENS,
+        temperature: 0.4,
         requestId,
         userId: context.userId,
         hackathonId: context.hackathonId,
