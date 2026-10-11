@@ -9,6 +9,7 @@ import { checkPostgresHealth, checkNeo4jHealth, getNeo4jDriver, checkRedisHealth
 
 // Business routes (existing)
 import { authRoutes } from './modules/auth/auth.routes';
+import { participantMirror } from './modules/sync/participant-mirror';
 import { hackathonRoutes } from './modules/hackathon/hackathon.routes';
 import { timelineRoutes } from './modules/timeline/timeline.routes';
 import { resourcesRoutes } from './modules/resources/resources.routes';
@@ -327,6 +328,7 @@ async function start(): Promise<void> {
       : null;
   const app = await buildApp();
   const shutdown = async (): Promise<void> => {
+    participantMirror.stop();
     await app.close();
     await stateStore?.close();
     process.exit(0);
@@ -338,6 +340,7 @@ async function start(): Promise<void> {
   // browsers attempt IPv6; an IPv4-only socket refuses them, which surfaces as
   // a misleading CORS/NetworkError. '::' accepts both families (bindv6only=0).
   await app.listen({ port, host: '::' });
+  participantMirror.start();
   // eslint-disable-next-line no-console
   console.log(`Organizer API listening on ${port} (env=${config.nodeEnv})`);
   // eslint-disable-next-line no-console

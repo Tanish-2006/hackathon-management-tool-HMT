@@ -276,10 +276,39 @@ class UiRun:
                 await tab.click()
                 await self.assert_page_ok(page)
 
+        async def teams_listed():
+            await page.get_by_test_id("link-nav-teams").click()
+            await self.assert_page_ok(page)
+            await expect(page.get_by_text("No teams yet")).to_have_count(0)
+            await page.get_by_placeholder("Team, idea number or member").fill(self.member)
+            await expect(page.get_by_text(self.member).first).to_be_visible()
+            await expect(page.get_by_text("AI phase").first).to_be_visible()
+
+        async def participants_listed():
+            await page.get_by_test_id("link-nav-participants").click()
+            await self.assert_page_ok(page)
+            await expect(page.get_by_text(self.member).first).to_be_visible()
+
+        async def analytics_filled():
+            await page.get_by_test_id("link-nav-analytics").click()
+            await self.assert_page_ok(page)
+            await expect(page.get_by_text("AI Helper progress")).to_be_visible()
+
+        async def dashboard_counts():
+            await page.get_by_test_id("link-nav-home").click()
+            await self.assert_page_ok(page)
+            participants = page.get_by_text("Participants", exact=True).first.locator("xpath=following::*[normalize-space(text())!=''][1]")
+            if (await participants.inner_text()).strip() in ("0", ""):
+                raise AssertionError("dashboard still shows 0 participants")
+
         for name, action in [
             ("organizer: login", login),
             ("organizer: every page loads", every_page),
             ("organizer: hackathon detail and tabs load", hackathon_detail),
+            ("organizer: Teams lists teams with members and AI phase", teams_listed),
+            ("organizer: Participants lists people by name", participants_listed),
+            ("organizer: Analytics shows AI Helper progress", analytics_filled),
+            ("organizer: dashboard participant count is not zero", dashboard_counts),
         ]:
             await self.step(name, action)
         await context.close()

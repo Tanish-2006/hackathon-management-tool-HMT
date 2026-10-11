@@ -38,6 +38,10 @@ export class AnalyticsService {
       submissionStatus: { totalTeams: teams.length, submitted, notSubmitted: Math.max(notSubmitted, 0), submissionRate: Number(submissionRate.toFixed(2)) },
       evaluationStatus: { totalFeedbacks: feedbacks.length, published, pendingReview, unpublished },
       feedbackCompletion: { totalAssignments, completed, completionRate: Number(completionRate.toFixed(2)) },
+      ideation: {
+        teamsPerPhase: [1, 2, 3, 4, 5, 6].map((phase) => teams.filter((t) => (t.ideationPhase ?? 1) === phase).length),
+        teamsWithProject: new Set(projects.map((p) => p.teamId)).size,
+      },
       generatedAt: new Date().toISOString(),
     };
     return analytics;

@@ -86,6 +86,27 @@ describe('SyncService — organizer push ingestion', () => {
   });
 });
 
+describe('SyncService — snapshot for the organizer', () => {
+  it('returns registrations, teams with ideation phase, named members and projects', async () => {
+    const prisma = new PrismaService();
+    const sync = new SyncService(prisma);
+    const db = prisma as any;
+    const user = await db.user.create({ data: { email: 'a@x.test', passwordHash: 'x', fullName: 'Asha Rao' } });
+    const team = await db.team.create({ data: { name: 'Alpha', hackathonId: 'h1', rosterNumber: 7 } });
+    await db.teamMember.create({ data: { teamId: team.id, userId: user.id, role: 'LEADER' } });
+    await db.registration.create({ data: { userId: user.id, hackathonId: 'h1', teamId: team.id } });
+    await db.project.upsert({ where: { teamId: team.id }, create: { title: 'Map', description: 'd', problemStatement: 'Lost students', hackathonId: 'h1' }, update: {} });
+    await db.aiConversation.create({ data: { id: `ideation:h1:team:${team.id}`, phase: 3, phaseHistory: [] } });
+
+    const snapshot = await sync.snapshot();
+
+    expect(snapshot.participants).toEqual([expect.objectContaining({ userId: user.id, hackathonId: 'h1', teamId: team.id, displayName: 'Asha Rao' })]);
+    expect(snapshot.teams).toEqual([expect.objectContaining({ id: team.id, name: 'Alpha', number: 7, ideationPhase: 3, memberIds: [user.id] })]);
+    expect(snapshot.teamMembers).toEqual([expect.objectContaining({ teamId: team.id, displayName: 'Asha Rao', role: 'LEADER' })]);
+    expect(snapshot.projects).toEqual([expect.objectContaining({ teamId: team.id, title: 'Map', problemStatement: 'Lost students' })]);
+  });
+});
+
 describe('SyncAuthGuard — shared secret only', () => {
   const SECRET = 'test-sync-secret-32-chars-minimum!!';
 

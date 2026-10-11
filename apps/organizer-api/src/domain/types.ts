@@ -345,6 +345,7 @@ export interface OrganizerAnalytics {
   submissionStatus: { totalTeams: number; submitted: number; notSubmitted: number; submissionRate: number };
   evaluationStatus: { totalFeedbacks: number; published: number; pendingReview: number; unpublished: number };
   feedbackCompletion: { totalAssignments: number; completed: number; completionRate: number };
+  ideation: { teamsPerPhase: number[]; teamsWithProject: number };
   generatedAt: string;
 }
 

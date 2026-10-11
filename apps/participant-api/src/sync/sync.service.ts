@@ -13,6 +13,69 @@ export class SyncService {
   private readonly logger = new Logger(SyncService.name);
   constructor(private readonly prisma: PrismaService) {}
 
+  async snapshot() {
+    const db = this.prisma as any;
+    const [registrations, teams, members, projects, users] = await Promise.all([
+      db.registration.findMany({}),
+      db.team.findMany({}),
+      db.teamMember.findMany({}),
+      db.project.findMany({}),
+      db.user.findMany({}),
+    ]);
+    const userById = new Map<string, any>(users.map((u: any) => [u.id, u]));
+    const nameOf = (userId: string) => userById.get(userId)?.fullName || 'Participant';
+    const teamById = new Map<string, any>(teams.map((t: any) => [t.id, t]));
+    const membership = new Map<string, any>();
+    for (const m of members) {
+      const team = teamById.get(m.teamId);
+      if (team) membership.set(`${team.hackathonId}:${m.userId}`, m);
+    }
+    const phases = await Promise.all(
+      teams.map((t: any) => db.aiConversation.findUnique({ where: { id: `ideation:${t.hackathonId}:team:${t.id}` } })),
+    );
+    return {
+      participants: registrations.map((r: any) => {
+        const member = membership.get(`${r.hackathonId}:${r.userId}`);
+        return {
+          id: r.id,
+          userId: r.userId,
+          hackathonId: r.hackathonId,
+          teamId: member?.teamId ?? r.teamId ?? null,
+          displayName: nameOf(r.userId),
+          participationStatus: 'ACTIVE',
+          joinedAt: r.createdAt,
+          createdAt: r.createdAt,
+        };
+      }),
+      teams: teams.map((t: any, index: number) => ({
+        id: t.id,
+        hackathonId: t.hackathonId,
+        name: t.name,
+        number: t.rosterNumber ?? null,
+        leadEmail: t.leadEmail ?? null,
+        memberIds: members.filter((m: any) => m.teamId === t.id).map((m: any) => m.userId),
+        projectId: projects.find((p: any) => p.teamId === t.id)?.id ?? null,
+        ideationPhase: phases[index]?.phase ?? 1,
+        createdAt: t.createdAt,
+      })),
+      teamMembers: members
+        .filter((m: any) => teamById.has(m.teamId))
+        .map((m: any) => ({ id: m.id, teamId: m.teamId, userId: m.userId, role: m.role, displayName: nameOf(m.userId), joinedAt: m.joinedAt })),
+      projects: projects.map((p: any) => ({
+        id: p.id,
+        teamId: p.teamId,
+        hackathonId: p.hackathonId ?? teamById.get(p.teamId)?.hackathonId ?? null,
+        title: p.title,
+        description: p.description,
+        problemStatement: p.problemStatement ?? null,
+        techStack: p.techStack ?? [],
+        repoUrl: p.repoUrl ?? null,
+        status: p.status ?? 'ACTIVE',
+        createdAt: p.createdAt,
+      })),
+    };
+  }
+
   async consumePublishedEvent(event: unknown) {
     const parsed = hackathonPublishedSchema.safeParse(event);
     if (!parsed.success) {

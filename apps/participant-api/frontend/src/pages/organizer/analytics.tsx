@@ -43,6 +43,8 @@ export default function OrganizerAnalytics(){
     {name:'Unpub', value: data.evaluationStatus.unpublished},
   ] : [],[data]);
 
+  const ideationPhases = useMemo(()=> (data?.ideation?.teamsPerPhase ?? []).map((teams:number,i:number)=>({ name: ['Problem','Users','Prior work','Gap','Feasibility','Pitch'][i] ?? `Phase ${i+1}`, teams })),[data]);
+
   const linePhases = useMemo(()=> data?.phaseProgress?.map((p:any,i:number)=>({ name: p.name.slice(0,8), status: p.status==='COMPLETED'?2 : p.status==='ACTIVE'?1:0, order:p.order })) || [],[data]);
 
   if(initial) return <div className="h-64 animate-pulse rounded-2xl bg-[#e9e5da]"/>
@@ -72,6 +74,22 @@ export default function OrganizerAnalytics(){
             <Stat label="Submission rate" value={`${Math.round(data.submissionStatus.submissionRate*100)}%`} sub={`${data.submissionStatus.submitted}/${data.submissionStatus.totalTeams} teams`}/>
             <Stat label="Feedback completion" value={`${Math.round(data.feedbackCompletion.completionRate*100)}%`} sub={`${data.feedbackCompletion.completed}/${data.feedbackCompletion.totalAssignments} assignments`} accent="lime"/>
           </div>
+
+          {data.ideation && <Card className="p-6">
+            <h3 className="font-bold">AI Helper progress</h3>
+            <p className="mt-1 text-xs text-[#77798a]">Teams by the phase their team thread has reached · {data.ideation.teamsWithProject}/{data.teamCount} teams have a project page</p>
+            <div className="mt-4 h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={ideationPhases}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e1d7"/>
+                  <XAxis dataKey="name" tick={{fontSize:11, fill:'#77798a'}} axisLine={false} tickLine={false}/>
+                  <YAxis allowDecimals={false} tick={{fontSize:11, fill:'#77798a'}} axisLine={false} tickLine={false}/>
+                  <Tooltip/>
+                  <Bar dataKey="teams" fill="#5aafbd" radius={[8,8,0,0]}/>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>}
 
           <div className="grid gap-6 lg:grid-cols-2">
             <Card className="p-6">

@@ -31,7 +31,7 @@ export class ParticipantsService {
         .filter((m) => m.teamId === team.id)
         .map((m) => {
           const user = memoryStore.users.get(m.userId);
-          return { userId: m.userId, displayName: user?.displayName ?? user?.fullName ?? m.userId, role: m.role ?? 'MEMBER' };
+          return { userId: m.userId, displayName: m.displayName ?? user?.displayName ?? user?.fullName ?? m.userId, role: m.role ?? 'MEMBER' };
         });
       const project = team.projectId ? memoryStore.projects.get(team.projectId) : null;
       // Respect privacy: do NOT expose private repo contents, only title/description
@@ -40,6 +40,8 @@ export class ParticipantsService {
             id: project.id,
             title: project.title,
             description: project.description,
+            problemStatement: project.problemStatement ?? null,
+            techStack: project.techStack ?? [],
             // repoUrl is PRIVATE - do not expose
             // Instead expose flag whether repo exists without URL
             hasRepository: !!project.repoUrl,
@@ -49,6 +51,8 @@ export class ParticipantsService {
         id: team.id,
         hackathonId: team.hackathonId,
         name: team.name,
+        number: team.number ?? null,
+        ideationPhase: team.ideationPhase ?? null,
         memberCount: members.length,
         members,
         project: safeProject,

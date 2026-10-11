@@ -22,6 +22,12 @@ export class SyncController {
     return this.sync.consume(event);
   }
 
+  @Get('snapshot')
+  @UseGuards(SyncAuthGuard)
+  async snapshot() {
+    return this.sync.snapshot();
+  }
+
   @Put('ideation/:hackathonId')
   @UseGuards(SyncAuthGuard)
   async ideation(@Param('hackathonId') hackathonId: string, @Body() config: unknown) {
