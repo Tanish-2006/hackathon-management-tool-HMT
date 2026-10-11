@@ -83,7 +83,7 @@ export const MAX_DECK_SLIDES = 60;
 export const MAX_DECK_CHARS = 24_000;
 const DECK_PHASE = 6;
 const THREAD_VIEW_LIMIT = 200;
-const ROUTER_HISTORY = 8;
+const ROUTER_HISTORY = 16;
 
 const CARD_TITLES: Record<IdeationCard['specialist'], string> = {
   research: 'Research Scout',
@@ -209,7 +209,7 @@ export class IdeationService {
           phase,
           phases: context.config.phases,
           history: history
-            .filter((m) => m.kind === 'user' || m.kind === 'assistant')
+            .filter((m) => (m.kind === 'user' || m.kind === 'assistant') && m.phase === phase)
             .slice(-ROUTER_HISTORY)
             .map((m) => ({
               role: m.kind === 'assistant' ? 'assistant' : 'user',

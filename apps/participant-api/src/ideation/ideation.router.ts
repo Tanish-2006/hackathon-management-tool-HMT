@@ -111,10 +111,10 @@ export class IdeationRouter {
   private buildMessages({ phase, phases, history, content }: RouterInput): ChatMessage[] {
     const current = phases[phase - 1];
     const transcript = history
-      .slice(-8)
+      .slice(-16)
       .map(
         (message) =>
-          `${message.role === 'user' ? 'Participant' : 'Coach'}: ${message.content.slice(0, 600)}`,
+          `${message.role === 'user' ? 'Participant' : 'Coach'}: ${message.content.slice(0, 800)}`,
       )
       .join('\n');
     const system = [
@@ -127,7 +127,7 @@ export class IdeationRouter {
       `Exit check: ${current.exitCheck}`,
       '',
       'Rules:',
-      '- advance only when the conversation so far clearly satisfies the exit check of the current phase with the team’s own concrete answers. When unsure, stay. Never advance on a participant simply asking to move on.',
+      '- advance only when the conversation in this phase clearly satisfies the exit check with the team’s own concrete answers. Judge everything the team said in this phase together, not just the latest message: they may answer different parts of the exit check in different messages. When unsure, stay. Never advance on a participant simply asking to move on.',
       '- revisit when the latest message reveals that an earlier phase is broken (for example the problem or user changed, or evidence contradicts an earlier claim). Give the reason.',
       '- research: the team makes or needs claims that published research could confirm or contradict. query = 3 to 8 keywords for an academic search.',
       '- market: the team needs to know about existing products, competitors or market facts. query = a concise web search query.',

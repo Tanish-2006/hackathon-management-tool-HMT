@@ -125,6 +125,7 @@ export class CoachPrompt {
       'Questions to work through (adapt them to this idea, do not read them out as a list):',
       ...current.questions.map((q) => `- ${q}`),
       `Exit check (what you are checking before the phase is done): ${current.exitCheck}`,
+      'While the exit check is not met yet, end your reply with one short line starting "To finish this phase:" that names the one or two specific things still missing. Keep it concrete, never a generic checklist.',
       'Phases: ' +
         config.phases.map((p) => `${p.id}. ${p.title}`).join('; ') +
         '. Participants cannot skip phases; do not start a later phase yourself.',

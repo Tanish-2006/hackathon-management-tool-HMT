@@ -329,6 +329,14 @@ describe('IdeationService', () => {
     expect(hub.watchers(service.threadId(context, 'team'))).toBe(0);
   });
 
+  it('gives the router only the current phase conversation', async () => {
+    await service.send(context, 'team', 'Phase one answer', emit);
+    await prisma.aiConversation.update({ where: { id: service.threadId(context, 'team') }, data: { phase: 2 } });
+    await service.send(context, 'team', 'Phase two answer', emit);
+    expect(routerDecide.mock.calls[0][0].phase).toBe(1);
+    expect(routerDecide.mock.calls[1][0]).toMatchObject({ phase: 2, history: [], content: 'Phase two answer' });
+  });
+
   it('redirects off-topic messages', async () => {
     routerDecide.mockResolvedValue(verdict({ offTopic: true }));
     await service.send(context, 'personal', 'a', emit);
