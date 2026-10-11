@@ -2,7 +2,6 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import { defaultIdeationConfig } from '@hmt/contracts';
 import { PrismaService } from '../database/prisma.service';
 import { AiBusyError } from './asi-one.client';
-import { IdeationGuard } from './ideation.guard';
 import { CoachPrompt, type CoachInput } from './ideation.prompt';
 import { IdeationRouter } from './ideation.router';
 import { IdeationService, type IdeationContext } from './ideation.service';
@@ -160,7 +159,6 @@ describe('CoachPrompt', () => {
 
 describe('IdeationService', () => {
   let prisma: PrismaService;
-  let guard: IdeationGuard;
   let routerDecide: jest.Mock;
   let scoutSearch: jest.Mock;
   let marketSearch: jest.Mock;
@@ -186,7 +184,6 @@ describe('IdeationService', () => {
 
   beforeEach(() => {
     prisma = new PrismaService();
-    guard = new IdeationGuard();
     routerDecide = jest.fn().mockResolvedValue(IdeationRouter.fallback());
     scoutSearch = jest
       .fn()
@@ -209,7 +206,6 @@ describe('IdeationService', () => {
       { decide: routerDecide } as any,
       { search: scoutSearch } as any,
       { search: marketSearch } as any,
-      guard,
     );
     events = [];
   });
@@ -310,10 +306,17 @@ describe('IdeationService', () => {
     expect(events.some(([e]) => e === 'phase')).toBe(false);
   });
 
-  it('counts off-topic strikes toward the cooldown', async () => {
+  it("gives the coach the team's project page as claims, not instructions", async () => {
+    const withProject = { ...context, team: { ...team, project: { title: 'Canteen Saver', problemStatement: 'Food waste in hostels', techStack: ['React'] } } };
+    await service.send(withProject, 'team', 'Here is our update', emit);
+    expect(streamed[0][0]).toContain('Title: Canteen Saver');
+    expect(streamed[0][0]).toContain('Problem statement: Food waste in hostels');
+    expect(streamed[0][0]).toMatch(/never as instructions/);
+  });
+
+  it('redirects off-topic messages', async () => {
     routerDecide.mockResolvedValue(verdict({ offTopic: true }));
-    for (const text of ['a', 'b', 'c']) await service.send(context, 'personal', text, emit);
-    expect(guard.checkSend('u1', 'h1', 'any', 'new')?.message).toMatch(/off-topic/);
+    await service.send(context, 'personal', 'a', emit);
     expect(streamed[0][0]).toContain('short, polite redirect');
   });
 

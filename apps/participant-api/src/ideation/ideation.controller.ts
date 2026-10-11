@@ -106,8 +106,7 @@ export class IdeationController {
     const context = await this.ideation.resolveContext(req.user.id, hackathonId);
     this.ideation.requireScope(context, dto.scope);
     const content = dto.content.trim();
-    const threadId = this.ideation.threadId(context, dto.scope);
-    const rejection = this.guard.checkSend(context.userId, hackathonId, threadId, content);
+    const rejection = this.guard.check(context.userId, hackathonId);
     if (rejection) return this.reject(reply, rejection);
     await this.stream(req, reply, context, dto.scope, (emit, signal) =>
       this.ideation.send(context, dto.scope, content, emit, signal),
@@ -124,8 +123,7 @@ export class IdeationController {
     const context = await this.ideation.resolveContext(req.user.id, hackathonId);
     this.ideation.requireScope(context, dto.scope);
     await this.ideation.assertDeckAllowed(context, dto.scope, dto.slides);
-    const threadId = this.ideation.threadId(context, dto.scope);
-    const rejection = this.guard.checkDeck(context.userId, hackathonId, threadId);
+    const rejection = this.guard.check(context.userId, hackathonId);
     if (rejection) return this.reject(reply, rejection);
     await this.stream(req, reply, context, dto.scope, (emit, signal) =>
       this.ideation.reviewDeck(context, dto.scope, dto.fileName.trim(), dto.slides, emit, signal),
@@ -167,7 +165,7 @@ export class IdeationController {
         emit('error', {
           message:
             'The AI coach is very busy right now. Your message is saved — try again shortly.',
-          retryAfter: 15,
+          retryAfter: 5,
         });
       else {
         emit('error', {

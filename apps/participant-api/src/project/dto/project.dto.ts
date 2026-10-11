@@ -5,6 +5,7 @@ import {
   IsEnum,
   IsUrl,
   IsNotEmpty,
+  MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { VisibilityLevel } from '../../common/enums/visibility.enum';
@@ -26,6 +27,12 @@ export class CreateProjectDto {
   @IsString()
   @IsNotEmpty()
   description: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  @MaxLength(4000)
+  problemStatement?: string;
 
   @ApiPropertyOptional({ example: ['NestJS', 'Neo4j', 'Redis'] })
   @IsArray()
@@ -63,6 +70,7 @@ export class CreateProjectDto {
 export class UpdateProjectDto {
   @ApiPropertyOptional() @IsString() @IsOptional() title?: string;
   @ApiPropertyOptional() @IsString() @IsOptional() description?: string;
+  @ApiPropertyOptional() @IsString() @IsOptional() @MaxLength(4000) problemStatement?: string;
   @ApiPropertyOptional()
   @IsArray()
   @IsString({ each: true })

@@ -8,7 +8,6 @@ import {
 import { defaultIdeationConfig, ideationConfigSchema, type IdeationConfig } from '@hmt/contracts';
 import { PrismaService } from '../database/prisma.service';
 import { AsiOneClient } from './asi-one.client';
-import { IdeationGuard } from './ideation.guard';
 import { IdeationRouter, type PhaseMove, type Specialist } from './ideation.router';
 import { MarketGapAnalyst, ResearchScout } from './ideation.sources';
 import {
@@ -102,7 +101,6 @@ export class IdeationService {
     private readonly router: IdeationRouter,
     private readonly scout: ResearchScout,
     private readonly market: MarketGapAnalyst,
-    private readonly guard: IdeationGuard,
   ) {}
 
   async resolveContext(userId: string, hackathonId: string): Promise<IdeationContext> {
@@ -219,7 +217,6 @@ export class IdeationService {
         },
         signal,
       );
-      if (verdict.offTopic) this.guard.strike(context.userId);
       let brief: SpecialistBrief | null = null;
       if (verdict.specialist !== 'none') {
         emit('stage', { name: verdict.specialist });
@@ -501,14 +498,17 @@ export class IdeationService {
     );
     const team: any = teams.find((t: any) => t && String(t.hackathonId) === String(hackathonId));
     if (!team) return null;
-    const members: any[] = await this.prisma.teamMember.findMany({
-      where: { teamId: team.id },
-      include: { user: true },
-    } as any);
+    const [members, project]: [any[], any] = await Promise.all([
+      this.prisma.teamMember.findMany({ where: { teamId: team.id }, include: { user: true } } as any),
+      this.prisma.project.findUnique({ where: { teamId: team.id } } as any),
+    ]);
     return {
       id: team.id,
       name: team.name,
       members: members.map((m) => ({ id: m.userId, name: this.displayName(m.user) })),
+      project: project
+        ? { title: project.title, description: project.description, problemStatement: project.problemStatement, techStack: project.techStack }
+        : null,
     };
   }
 
