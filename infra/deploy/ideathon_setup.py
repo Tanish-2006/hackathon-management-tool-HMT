@@ -59,6 +59,9 @@ class IdeathonSetup:
         for name, description, weight in CRITERIA if not criteria else []:
             self.expect(f"criterion {name}", *self.api.call("POST", f"/organizer/api/v1/hackathons/{hid}/evaluation-criteria",
                 {"name": name, "description": description, "weight": weight, "maxScore": 10}, token))
+        if hackathon.get("status") in ("DRAFT", "REVIEW"):
+            self.expect("timeline", *self.api.call("POST", f"/organizer/api/v1/hackathons/{hid}/timeline/materialize",
+                {"eventStart": EVENT["eventStart"], "eventEnd": EVENT["eventEnd"]}, token), ok=(200, 201, 409))
         steps = {"DRAFT": ("review", "confirm", "publish"), "REVIEW": ("confirm", "publish"), "CONFIRMED": ("publish",)}
         for step in steps.get(hackathon.get("status"), ()):
             self.expect(step, *self.api.call("POST", f"/organizer/api/v1/hackathons/{hid}/{step}", {}, token))
