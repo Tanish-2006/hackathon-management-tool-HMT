@@ -37,7 +37,7 @@ export const DEFAULT_PHASES: readonly IdeationPhase[] = [
       'Why is this problem worth solving now, and why by your team?',
     ],
     exitCheck:
-      'The team states one narrow problem without mentioning a solution, names who suffers from it, and gives at least one concrete example or data point showing it is real, frequent and costly.',
+      'The team states one clear problem in its own words without jumping to a solution, says who has it, and gives at least one real example, observation or reasonable estimate of why it matters. Hard data is not required yet.',
   },
   {
     id: 2,
@@ -47,11 +47,11 @@ export const DEFAULT_PHASES: readonly IdeationPhase[] = [
       'Who is your primary user? Describe one specific person: role, context, constraints.',
       'What do they do today to deal with the problem, step by step?',
       'Why is their current workaround not good enough for them?',
-      'How do you know: who did you talk to, what did you observe, what data did you find?',
+      'How do you know: a conversation, your own experience, something you observed, or a reasonable assumption you will check later?',
       'Is the person who feels the pain the same person who would pay or decide?',
     ],
     exitCheck:
-      'The team names a sharp primary user, describes their current workaround concretely, and backs it with real evidence such as conversations, observations or data rather than guesses.',
+      'The team describes its main user and what they do today to cope. Evidence can be a few conversations, personal experience or observation; clearly labelled assumptions are fine at this stage.',
   },
   {
     id: 3,
@@ -65,7 +65,7 @@ export const DEFAULT_PHASES: readonly IdeationPhase[] = [
       'What did you find that surprised you or challenged your assumptions?',
     ],
     exitCheck:
-      'The team names at least two existing solutions or studies with sources, explains what each does well and where it falls short for their user, and has updated its view where the evidence demanded it.',
+      'The team names at least one or two existing solutions, tools or studies (the coach’s research and market cards count) and says briefly where they fall short for its user.',
   },
   {
     id: 4,
@@ -79,7 +79,7 @@ export const DEFAULT_PHASES: readonly IdeationPhase[] = [
       'What will you deliberately leave out of the first version?',
     ],
     exitCheck:
-      'The team names a specific gap tied to their prior-work findings, explains their solution in one sentence, and gives a credible reason why their user would switch, without overclaiming.',
+      'The team says what is missing from existing options and describes its solution in a sentence or two, with a plausible reason its user would choose it.',
   },
   {
     id: 5,
@@ -93,7 +93,7 @@ export const DEFAULT_PHASES: readonly IdeationPhase[] = [
       'What legal, ethical or safety issues could block it?',
     ],
     exitCheck:
-      'The team describes a realistic minimum prototype matched to its skills, names its dependencies, states its riskiest assumption, and has a cheap, concrete way to test it.',
+      'The team describes a simple first version it could build or mock up, the main things it depends on, and its biggest risk with one idea for testing it.',
   },
   {
     id: 6,
@@ -107,7 +107,7 @@ export const DEFAULT_PHASES: readonly IdeationPhase[] = [
       'Does your deck match what you established in phases 1 to 5, with no overclaims?',
     ],
     exitCheck:
-      'The team delivers a 60-second pitch consistent with phases 1 to 5, has honest answers to likely judge questions, has a slide outline with one clear message per slide, and has addressed the deck review findings.',
+      'The team can explain its problem, user, gap and solution in about a minute, has a rough slide outline, and has thought about the questions judges are likely to ask.',
   },
 ];
 

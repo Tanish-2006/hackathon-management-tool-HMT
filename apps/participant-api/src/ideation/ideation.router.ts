@@ -127,7 +127,7 @@ export class IdeationRouter {
       `Exit check: ${current.exitCheck}`,
       '',
       'Rules:',
-      '- advance only when the conversation in this phase clearly satisfies the exit check with the team’s own concrete answers. Judge everything the team said in this phase together, not just the latest message: they may answer different parts of the exit check in different messages. When unsure, stay. Never advance on a participant simply asking to move on.',
+      '- advance when the team has reasonably covered the main points of the exit check in this phase. It does not need to be perfect: later phases refine it, and personal experience or clearly labelled assumptions are acceptable evidence. Judge everything the team said in this phase together, not just the latest message. Do not hold a team back over minor gaps. Stay only when an essential part is clearly missing. Never advance on a participant simply asking to move on without having covered the essentials.',
       '- revisit when the latest message reveals that an earlier phase is broken (for example the problem or user changed, or evidence contradicts an earlier claim). Give the reason.',
       '- research: the team makes or needs claims that published research could confirm or contradict. query = 3 to 8 keywords for an academic search.',
       '- market: the team needs to know about existing products, competitors or market facts. query = a concise web search query.',

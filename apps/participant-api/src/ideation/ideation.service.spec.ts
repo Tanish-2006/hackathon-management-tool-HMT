@@ -52,14 +52,14 @@ const userMsg = (content: string, phase: number, authorName = 'Ben') => ({
 });
 
 describe('CoachPrompt', () => {
-  it('encodes the honesty and coaching rules', () => {
+  it('encodes the honest, assistive coaching rules', () => {
     const system = CoachPrompt.system(input());
-    expect(system).toMatch(/honest and unbiased/i);
-    expect(system).toMatch(/no flattery/i);
-    expect(system).toMatch(/at most 3 questions/i);
-    expect(system).toContain(
-      'Never write the idea, the solution, the pitch, the script or the slides',
-    );
+    expect(system).toMatch(/supportive mentor/i);
+    expect(system).toMatch(/honest and fair/i);
+    expect(system).toMatch(/offer a hint, a short example, or two or three possible directions/i);
+    expect(system).toMatch(/at most 2 questions/i);
+    expect(system).toMatch(/clearly labelled assumption/i);
+    expect(system).toContain('do not hand over a complete finished idea');
     expect(system).toContain('Never invent sources');
     expect(system).toContain('Mention the campus innovation cell.');
     expect(system).toContain('Reduce food waste in hostels');
