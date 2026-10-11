@@ -18,6 +18,12 @@ EVENT = {
     "eventStart": "2026-10-12T03:30:00Z",
     "eventEnd": "2026-10-15T12:30:00Z",
 }
+CRITERIA = [
+    ("Problem clarity", "Is the problem real, specific and backed by evidence?", 0.25),
+    ("Originality", "How the idea differs from what already exists", 0.25),
+    ("Feasibility", "Can the team realistically build and run it?", 0.25),
+    ("Pitch", "Clarity and honesty of the deck and presentation", 0.25),
+]
 
 
 class IdeathonSetup:
@@ -32,20 +38,31 @@ class IdeathonSetup:
         return body.get("data", body) if isinstance(body, dict) else body
 
     def organizer(self, email):
-        password = secrets.token_urlsafe(12)
-        body = self.expect("organizer signup", *self.api.call("POST", "/organizer/api/v1/auth/register", {
+        password = os.environ.get("ORGANIZER_PASSWORD") or secrets.token_urlsafe(12)
+        status, body = self.api.call("POST", "/organizer/api/v1/auth/register", {
             "email": email, "password": password, "fullName": "Ideathon Organizer",
             "displayName": "Ideathon Organizer", "role": "ORGANIZER", "phoneNumber": "+919999900001",
-        }))
-        return body["accessToken"], password
+        })
+        if status == 409:
+            status, body = self.api.call("POST", "/organizer/api/v1/auth/login", {"email": email, "password": password})
+        return self.expect("organizer account", status, body)["accessToken"], password
 
     def publish(self, token):
-        closed_now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        hackathon = self.expect("create hackathon", *self.api.call(
-            "POST", "/organizer/api/v1/hackathons", {**EVENT, "registrationEnd": closed_now}, token))
-        for step in ("review", "confirm", "publish"):
-            self.expect(step, *self.api.call("POST", f"/organizer/api/v1/hackathons/{hackathon['id']}/{step}", {}, token))
-        return hackathon["id"]
+        existing = self.expect("list hackathons", *self.api.call("GET", "/organizer/api/v1/hackathons", token=token))
+        hackathon = next((h for h in existing if h["title"] == EVENT["title"]), None)
+        if not hackathon:
+            closed_now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            hackathon = self.expect("create hackathon", *self.api.call(
+                "POST", "/organizer/api/v1/hackathons", {**EVENT, "registrationEnd": closed_now}, token))
+        hid = hackathon["id"]
+        criteria = self.expect("list criteria", *self.api.call("GET", f"/organizer/api/v1/hackathons/{hid}/evaluation-criteria", token=token))
+        for name, description, weight in CRITERIA if not criteria else []:
+            self.expect(f"criterion {name}", *self.api.call("POST", f"/organizer/api/v1/hackathons/{hid}/evaluation-criteria",
+                {"name": name, "description": description, "weight": weight, "maxScore": 10}, token))
+        steps = {"DRAFT": ("review", "confirm", "publish"), "REVIEW": ("confirm", "publish"), "CONFIRMED": ("publish",)}
+        for step in steps.get(hackathon.get("status"), ()):
+            self.expect(step, *self.api.call("POST", f"/organizer/api/v1/hackathons/{hid}/{step}", {}, token))
+        return hid
 
     def import_roster(self, hackathon_id):
         return self.expect("roster import", *self.api.call(
