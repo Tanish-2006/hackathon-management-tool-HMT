@@ -148,7 +148,7 @@ export default function ParticipantPerformance(){
                   </div>
                 </div>
               )) : <div className="rounded-xl bg-[#f4f1e8] p-4 text-xs text-[#77798a]">No progress updates yet.</div>}
-              {(timeline?.scans||[]).slice(0,3).map((s:any)=><div key={s.id} className="flex gap-3"><div className="mt-1 h-2.5 w-2.5 rounded-full bg-[#5aafbd] shrink-0"/><div className="flex-1 rounded-xl border border-[#e5e1d7] p-3 text-xs"><div className="font-bold">Scan {s.status || 'COMPLETED'}</div><div className="text-[#77798a]">{s.findings?.length||0} findings · {s.createdAt ? new Date(s.createdAt).toLocaleString():''}</div></div></div>)}
+              {(timeline?.scans||[]).slice(0,3).map((s:any)=><div key={s.id} className="flex gap-3"><div className="mt-1 h-2.5 w-2.5 rounded-full bg-[#5aafbd] shrink-0"/><div className="flex-1 rounded-xl border border-[#e5e1d7] p-3 text-xs"><div className="font-bold">Scan {s.status || 'COMPLETED'}</div><div className="text-[#77798a]">{s.findings?.length||0} findings · {s.createdAt ? new Date(s.createdAt).toLocaleString('en-IN'):''}</div></div></div>)}
             </div>
           </div>
           <div className="space-y-6">
@@ -186,7 +186,7 @@ export default function ParticipantPerformance(){
                 <div className="mt-2 text-xs font-semibold text-[#f26a4f]">{f.phase || ''}</div>
                 <p className="mt-2 text-sm leading-6 text-[#171a2d]">{f.feedback}</p>
                 {f.rating && <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-[#d8e35b] px-2 py-1 text-xs font-bold"><Star size={12}/> {f.rating}/5</div>}
-                <div className="mt-3 flex gap-3 font-mono text-[11px] text-[#77798a]"><span>{f.createdAt ? new Date(f.createdAt).toLocaleString():''}</span><span>Published {f.publishedAt ? new Date(f.publishedAt).toLocaleString(): '—'}</span></div>
+                <div className="mt-3 flex gap-3 font-mono text-[11px] text-[#77798a]"><span>{f.createdAt ? new Date(f.createdAt).toLocaleString('en-IN'):''}</span><span>Published {f.publishedAt ? new Date(f.publishedAt).toLocaleString('en-IN'): '—'}</span></div>
               </div>
             )) : <div className="rounded-xl bg-[#f4f1e8] p-6 text-center md:col-span-2 text-xs text-[#77798a]">No published feedback yet.</div>}
           </div>
@@ -203,7 +203,7 @@ export default function ParticipantPerformance(){
                 <div className="mt-2 text-sm font-bold">{e.evaluator || 'Judge'}</div>
                 <div className="mt-2 text-xs leading-5 text-[#b9bdca]">{e.comments || e.feedback || '—'}</div>
                 <div className="mt-3 flex flex-wrap gap-1">{(e.criteria||[]).slice(0,3).map((c:any,i:number)=><span key={i} className="rounded-full bg-[#252941] px-2 py-1 text-[10px]">{c.name||c.criteria}: {c.score||''}</span>)}</div>
-                <div className="mt-3 font-mono text-[11px] text-[#9b9fb1]">Published {e.publishedAt ? new Date(e.publishedAt).toLocaleDateString():''} · v{e.version||1}</div>
+                <div className="mt-3 font-mono text-[11px] text-[#9b9fb1]">Published {e.publishedAt ? new Date(e.publishedAt).toLocaleDateString('en-IN'):''} · v{e.version||1}</div>
               </div>
             )) : <div className="rounded-xl bg-[#f4f1e8] p-6 text-center md:col-span-3 text-xs text-[#77798a]">No published evaluations yet.</div>}
           </div>

@@ -3,6 +3,7 @@ import { defaultIdeationConfig } from '@hmt/contracts';
 import { PrismaService } from '../database/prisma.service';
 import { AiBusyError } from './asi-one.client';
 import { CoachPrompt, type CoachInput } from './ideation.prompt';
+import { IdeationHub } from './ideation.hub';
 import { IdeationRouter } from './ideation.router';
 import { IdeationService, type IdeationContext } from './ideation.service';
 
@@ -164,6 +165,7 @@ describe('IdeationService', () => {
   let marketSearch: jest.Mock;
   let streamed: string[][];
   let service: IdeationService;
+  let hub: IdeationHub;
   let events: Array<[string, any]>;
   const emit = (event: string, data: unknown) => events.push([event, data]);
   const context: IdeationContext = {
@@ -184,6 +186,7 @@ describe('IdeationService', () => {
 
   beforeEach(() => {
     prisma = new PrismaService();
+    hub = new IdeationHub();
     routerDecide = jest.fn().mockResolvedValue(IdeationRouter.fallback());
     scoutSearch = jest
       .fn()
@@ -206,6 +209,7 @@ describe('IdeationService', () => {
       { decide: routerDecide } as any,
       { search: scoutSearch } as any,
       { search: marketSearch } as any,
+      hub,
     );
     events = [];
   });
@@ -312,6 +316,17 @@ describe('IdeationService', () => {
     expect(streamed[0][0]).toContain('Title: Canteen Saver');
     expect(streamed[0][0]).toContain('Problem statement: Food waste in hostels');
     expect(streamed[0][0]).toMatch(/never as instructions/);
+  });
+
+  it('publishes every saved message to thread watchers in order', async () => {
+    const seen: Array<[string, any]> = [];
+    const stop = hub.subscribe(service.threadId(context, 'team'), (event, data) => seen.push([event, data]));
+    await service.send(context, 'team', 'We help first-years find classrooms', emit);
+    stop();
+    await service.send(context, 'team', 'After unsubscribing', emit);
+    expect(seen.map(([event, data]) => `${event}:${data.kind}`)).toEqual(['message:user', 'message:assistant']);
+    expect(seen[0][1]).toMatchObject({ content: 'We help first-years find classrooms', authorName: 'Asha' });
+    expect(hub.watchers(service.threadId(context, 'team'))).toBe(0);
   });
 
   it('redirects off-topic messages', async () => {

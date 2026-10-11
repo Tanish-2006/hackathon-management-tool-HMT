@@ -180,7 +180,7 @@ export default function MentorFeedback(){
                   <div className="mt-2 rounded-xl bg-[#f4f1e8] p-3">
                     <div className="text-xs font-bold">{versions[f.id].length} versions</div>
                     {versions[f.id].map((v:any)=>(
-                      <div key={v.id} className="mt-1 flex justify-between rounded-lg bg-white px-2 py-1 text-xs border border-[#e5e1d7]"><span>v{v.version} {v.isCorrection?'(correction)':'(original)'} · {v.score}</span><span className="text-[#77798a]">{new Date(v.createdAt).toLocaleTimeString()}</span></div>
+                      <div key={v.id} className="mt-1 flex justify-between rounded-lg bg-white px-2 py-1 text-xs border border-[#e5e1d7]"><span>v{v.version} {v.isCorrection?'(correction)':'(original)'} · {v.score}</span><span className="text-[#77798a]">{new Date(v.createdAt).toLocaleTimeString('en-IN')}</span></div>
                     ))}
                   </div>
                 )}

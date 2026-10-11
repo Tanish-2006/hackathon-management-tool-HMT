@@ -9,6 +9,7 @@ import { defaultIdeationConfig, ideationConfigSchema, type IdeationConfig } from
 import { PrismaService } from '../database/prisma.service';
 import { AsiOneClient } from './asi-one.client';
 import { IdeationRouter, type PhaseMove, type Specialist } from './ideation.router';
+import { IdeationHub } from './ideation.hub';
 import { MarketGapAnalyst, ResearchScout } from './ideation.sources';
 import {
   CoachPrompt,
@@ -101,6 +102,7 @@ export class IdeationService {
     private readonly router: IdeationRouter,
     private readonly scout: ResearchScout,
     private readonly market: MarketGapAnalyst,
+    private readonly hub: IdeationHub,
   ) {}
 
   async resolveContext(userId: string, hackathonId: string): Promise<IdeationContext> {
@@ -422,7 +424,9 @@ export class IdeationService {
     data: Omit<IdeationMessage, 'id' | 'createdAt'>,
   ): Promise<IdeationMessage> {
     const row = await this.prisma.aiMessage.create({ data: { conversationId, ...data } } as any);
-    return this.toMessage(row);
+    const message = this.toMessage(row);
+    this.hub.publish(conversationId, 'message', message);
+    return message;
   }
 
   private async ensureConversation(

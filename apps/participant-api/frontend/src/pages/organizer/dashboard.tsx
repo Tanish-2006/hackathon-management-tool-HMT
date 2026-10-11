@@ -20,7 +20,7 @@ function formatDate(iso: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
 }
 
 function relativeTime(iso: string): string {
@@ -88,7 +88,7 @@ export default function OrganizerDashboard(){
   const submissionTotal = submissionData.reduce((n,e)=>n+e.value,0);
 
   const teamTrend = (overview?.trend ?? []).map((d:any)=>({
-    day: new Date(d.day).toLocaleDateString(undefined,{weekday:'short'}),
+    day: new Date(d.day).toLocaleDateString('en-IN',{weekday:'short'}),
     teams: d.teams ?? 0,
     subs: d.subs ?? 0,
   }));

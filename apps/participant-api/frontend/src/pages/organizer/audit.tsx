@@ -67,7 +67,7 @@ export default function OrganizerAudit(){
               <tbody>
                 {filtered.map((l:any)=>(
                   <tr key={l.id} onClick={async()=>{ try{ const full=await organizerApi.getAuditLog(l.id); setSelectedLog(full)}catch{ setSelectedLog(l)}}} className={`border-b border-[#e5e1d7]/60 last:border-0 cursor-pointer hover:bg-[#f4f1e8] ${selectedLog?.id===l.id?'bg-[#fff6f3]':''}`}>
-                    <td className="px-3 py-2.5 font-mono text-xs">{new Date(l.timestamp).toLocaleString()}</td>
+                    <td className="px-3 py-2.5 font-mono text-xs">{new Date(l.timestamp).toLocaleString('en-IN')}</td>
                     <td className="px-3 py-2.5"><span className="rounded-full bg-[#f4f1e8] px-2 py-1 text-[11px] font-bold">{l.action}</span></td>
                     <td className="px-3 py-2.5 text-xs">{l.resourceType} <span className="font-mono text-[11px] text-[#77798a]">{l.resourceId?.slice(0,6)||'—'}</span></td>
                     <td className="px-3 py-2.5 font-mono text-xs">{l.actorId?.slice(0,8)||'—'} <span className="text-[#77798a]">{l.actorRole||''}</span></td>
@@ -85,7 +85,7 @@ export default function OrganizerAudit(){
             <h3 className="font-bold">Detail</h3>
             {selectedLog ? (
               <div className="mt-3 space-y-2 text-xs">
-                <div className="rounded-xl bg-[#f4f1e8] p-3"><div className="font-bold">{selectedLog.action}</div><div className="text-[#77798a]">{selectedLog.resourceType} · {selectedLog.resourceId}</div><div className="mt-1 font-mono text-[11px]">id {selectedLog.id}</div><div className="font-mono text-[11px]">{new Date(selectedLog.timestamp).toLocaleString()}</div></div>
+                <div className="rounded-xl bg-[#f4f1e8] p-3"><div className="font-bold">{selectedLog.action}</div><div className="text-[#77798a]">{selectedLog.resourceType} · {selectedLog.resourceId}</div><div className="mt-1 font-mono text-[11px]">id {selectedLog.id}</div><div className="font-mono text-[11px]">{new Date(selectedLog.timestamp).toLocaleString('en-IN')}</div></div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <div className="rounded-xl border border-[#e5e1d7] bg-white p-2"><div className="text-[#77798a]">Actor</div><div className="font-mono font-bold">{selectedLog.actorId?.slice(0,12)} · {selectedLog.actorRole}</div></div>
                   <div className="rounded-xl border border-[#e5e1d7] bg-white p-2"><div className="text-[#77798a]">Outcome</div><div className="font-bold">{selectedLog.outcome}</div></div>

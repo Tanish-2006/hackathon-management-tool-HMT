@@ -111,7 +111,7 @@ export default function OrganizerFeedback(){
                   {versions[f.id].map((v:any)=>(
                     <div key={v.id} className="flex justify-between rounded-lg bg-white px-2 py-1.5 text-xs border border-[#e5e1d7]">
                       <span><b>v{v.version}</b> {v.isCorrection ? '(correction)' : '(original)'} · score {v.score}</span>
-                      <span className="text-[#77798a]">{new Date(v.createdAt).toLocaleTimeString()} · {v.publicationStatus}</span>
+                      <span className="text-[#77798a]">{new Date(v.createdAt).toLocaleTimeString('en-IN')} · {v.publicationStatus}</span>
                     </div>
                   ))}
                 </div>

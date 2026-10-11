@@ -7,7 +7,10 @@ import {
   retryAfterSeconds,
   streamDeckReview,
   streamIdeationMessage,
+  watchIdeation,
   type IdeationDeckSlide,
+  type IdeationLiveEvent,
+  type IdeationMessage,
   type IdeationScope,
   type IdeationState,
   type IdeationStreamEvent,
@@ -16,11 +19,12 @@ import { useHackathonContext } from '@/hooks/use-hackathon-context';
 import { displayNameOf, useAuth } from '@/services/auth-context';
 import { cn } from '@/lib/utils';
 import { PhaseProgress } from '@/components/ai-helper/PhaseProgress';
-import { ChatThread, type LiveTurn } from '@/components/ai-helper/ChatThread';
+import { ChatThread, type LiveTurn, type RemoteTurn } from '@/components/ai-helper/ChatThread';
 import { Composer, useCountdown } from '@/components/ai-helper/Composer';
 import { DeckUpload } from '@/components/ai-helper/DeckUpload';
 
 const POLL_INTERVAL_MS = 15000;
+const RECONNECT_MAX_MS = 15000;
 const DEFAULT_MAX_CHARS = 4000;
 const DECK_PHASE = 6;
 const SCOPES: Array<{ value: IdeationScope; label: string; Icon: typeof Users }> = [
@@ -32,6 +36,35 @@ type StreamStarter = (onEvent: (event: IdeationStreamEvent) => void, signal: Abo
 
 function friendly(e: unknown) {
   return e instanceof ApiError ? e.message : (e as Error)?.message || 'Something went wrong';
+}
+
+function threadKey(scope: IdeationScope) {
+  return scope === 'team' ? 'teamThread' : 'personalThread';
+}
+
+function withMessage(state: IdeationState, scope: IdeationScope, message: IdeationMessage): IdeationState {
+  const key = threadKey(scope);
+  const thread = state[key];
+  if (!thread || thread.messages.some((m) => m.id === message.id)) return state;
+  const messages = [...thread.messages, message].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const phase = message.kind === 'phase' && message.phaseChange ? message.phaseChange.to : thread.phase;
+  return { ...state, [key]: { ...thread, phase, messages } };
+}
+
+function mergeState(next: IdeationState, prev: IdeationState | null): IdeationState {
+  if (!prev) return next;
+  let merged = next;
+  for (const scope of ['team', 'personal'] as const) {
+    for (const message of prev[threadKey(scope)]?.messages ?? []) merged = withMessage(merged, scope, message);
+  }
+  return merged;
+}
+
+function waitFor(ms: number, signal: AbortSignal) {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+  });
 }
 
 function applyStreamEvent(turn: LiveTurn, event: IdeationStreamEvent): LiveTurn {
@@ -68,6 +101,10 @@ export default function ParticipantAIHelper() {
   const cooldownSeconds = useCountdown(cooldownUntil);
   const abortRef = useRef<AbortController | null>(null);
   const streamingRef = useRef(false);
+  const liveScopeRef = useRef<IdeationScope | null>(null);
+  const connectedRef = useRef(false);
+  const [connected, setConnected] = useState(false);
+  const [remote, setRemote] = useState<Record<IdeationScope, RemoteTurn | null>>({ team: null, personal: null });
   const epochRef = useRef(0);
 
   const load = useCallback(async (silent: boolean) => {
@@ -77,7 +114,7 @@ export default function ParticipantAIHelper() {
     try {
       const next = await hmtBackendService.getIdeation(hackathonId);
       if (epoch !== epochRef.current || (silent && streamingRef.current)) return;
-      setState(next);
+      setState((prev) => mergeState(next, silent ? prev : null));
       setLoadError(null);
       setScope((prev) => prev ?? (next.team ? 'team' : 'personal'));
     } catch (e) {
@@ -101,10 +138,58 @@ export default function ParticipantAIHelper() {
     if (!hackathonId || !ctx.selectedIsRegistered) return;
     load(false);
     const timer = setInterval(() => {
-      if (!streamingRef.current && !document.hidden) load(true);
+      if (!streamingRef.current && !document.hidden && !connectedRef.current) load(true);
     }, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [hackathonId, ctx.selectedIsRegistered, load]);
+
+  const onLive = useCallback((event: IdeationLiveEvent) => {
+    if (event.event === 'ready') return;
+    const { scope } = event.data;
+    if (streamingRef.current && liveScopeRef.current === scope) return;
+    if (event.event === 'message') {
+      const { scope: _scope, ...message } = event.data;
+      setState((prev) => (prev ? withMessage(prev, scope, message) : prev));
+      if (message.kind === 'assistant') setRemote((r) => ({ ...r, [scope]: null }));
+    } else if (event.event === 'stage') {
+      setRemote((r) => ({ ...r, [scope]: { stage: event.data.name, reply: r[scope]?.reply ?? '' } }));
+    } else if (event.event === 'delta') {
+      setRemote((r) => ({ ...r, [scope]: { stage: r[scope]?.stage ?? 'writing', reply: (r[scope]?.reply ?? '') + event.data.text } }));
+    } else if (event.event === 'settled') {
+      setRemote((r) => ({ ...r, [scope]: null }));
+      load(true);
+    }
+  }, [load]);
+
+  useEffect(() => {
+    if (!hackathonId || !ctx.selectedIsRegistered) return;
+    const controller = new AbortController();
+    const setOnline = (online: boolean) => {
+      connectedRef.current = online;
+      setConnected(online);
+    };
+    (async () => {
+      for (let attempt = 0; !controller.signal.aborted; attempt += 1) {
+        try {
+          await watchIdeation(hackathonId, (event) => {
+            if (event.event === 'ready') {
+              if (attempt > 0) load(true);
+              attempt = 0;
+              setOnline(true);
+            }
+            onLive(event);
+          }, controller.signal);
+        } catch {}
+        setOnline(false);
+        setRemote({ team: null, personal: null });
+        await waitFor(Math.min(1000 * 2 ** attempt, RECONNECT_MAX_MS), controller.signal);
+      }
+    })();
+    return () => {
+      controller.abort();
+      setOnline(false);
+    };
+  }, [hackathonId, ctx.selectedIsRegistered, load, onLive]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -121,6 +206,8 @@ export default function ParticipantAIHelper() {
     const controller = new AbortController();
     abortRef.current = controller;
     streamingRef.current = true;
+    liveScopeRef.current = activeScope;
+    setRemote((r) => ({ ...r, [activeScope]: null }));
     epochRef.current += 1;
     const epoch = epochRef.current;
     let accepted = false;
@@ -147,7 +234,7 @@ export default function ParticipantAIHelper() {
         if (accepted) {
           try {
             const next = await hmtBackendService.getIdeation(hackathonId);
-            if (epoch === epochRef.current) setState(next);
+            if (epoch === epochRef.current) setState((prev) => mergeState(next, prev));
           } catch {}
         }
         if (epoch === epochRef.current) setLive(null);
@@ -270,6 +357,10 @@ export default function ParticipantAIHelper() {
               <span className="ml-auto truncate px-2 text-[11px] text-[#77798a]">
                 {activeScope === 'team' ? (state.team ? `${state.team.name} · shared with your team` : '') : 'Only you can see this thread'}
               </span>
+              <span className={cn('mr-1 inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wider', connected ? 'bg-[#e8f5e9] text-[#2e7d32]' : 'bg-[#f4f1e8] text-[#77798a]')} title={connected ? 'New messages appear instantly' : 'Reconnecting… messages refresh every few seconds'} data-testid="status-live">
+                <span className={cn('h-1.5 w-1.5 rounded-full', connected ? 'animate-pulse bg-[#2e7d32]' : 'bg-[#aaa9a2]')} aria-hidden />
+                {connected ? 'Live' : 'Offline'}
+              </span>
             </div>
             <div id="ai-helper-panel" role="tabpanel" aria-labelledby={`ai-helper-tab-${activeScope}`}>
               {teamLocked ? (
@@ -288,6 +379,7 @@ export default function ParticipantAIHelper() {
                     messages={thread?.messages ?? []}
                     phases={state.phases}
                     live={liveHere}
+                    remote={liveHere ? null : remote[activeScope]}
                     currentUserId={user?.id ?? null}
                     currentUserName={userName}
                     resetKey={`${hackathonId}:${activeScope}`}

@@ -26,7 +26,7 @@ export class DeckExtractor {
     if (slides.length > DECK_LIMITS.maxSlides) throw new DeckExtractError(`This deck has ${slides.length} slides. The limit is ${DECK_LIMITS.maxSlides}.`);
     if (slides.every((slide) => !slide.title && slide.text === EMPTY_SLIDE_TEXT)) throw new DeckExtractError('No text found in this deck. Image-only slides cannot be reviewed.');
     const totalChars = slides.reduce((sum, slide) => sum + slide.title.length + slide.text.length, 0);
-    if (totalChars > DECK_LIMITS.maxChars) throw new DeckExtractError(`This deck has ${totalChars.toLocaleString()} characters of text. The limit is ${DECK_LIMITS.maxChars.toLocaleString()}; trim long slides or notes.`);
+    if (totalChars > DECK_LIMITS.maxChars) throw new DeckExtractError(`This deck has ${totalChars.toLocaleString('en-IN')} characters of text. The limit is ${DECK_LIMITS.maxChars.toLocaleString('en-IN')}; trim long slides or notes.`);
     return slides;
   }
 

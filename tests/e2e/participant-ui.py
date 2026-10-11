@@ -237,11 +237,53 @@ class UiRun:
             await expect(page.get_by_text(f"Problem statement {self.stamp}")).to_be_visible()
             await expect(page.get_by_text(f"Milestone {self.stamp}")).to_be_visible()
 
+        async def realtime():
+            sender_context = await browser.new_context(viewport={"width": 1366, "height": 860})
+            sender = await sender_context.new_page()
+            self.watch(sender, "sender")
+            await sender.goto(f"{self.base}/join")
+            await sender.get_by_test_id("input-roster-email").fill(self.email)
+            await sender.get_by_test_id("button-roster-find").click()
+            await sender.get_by_role("button", name=self.member).first.click()
+            await sender.wait_for_url("**/participant/ai-helper")
+            for viewer in (sender, page):
+                await viewer.get_by_role("tab", name="Team").click()
+                await expect(viewer.get_by_test_id("status-live")).to_have_text("Live", timeout=15_000)
+            text = f"Realtime check {self.stamp}: who exactly gets lost on campus?"
+            await sender.get_by_label("Message the AI coach").fill(text)
+            started = time.monotonic()
+            await sender.get_by_label("Send message").click()
+            await expect(page.get_by_text(text)).to_be_visible(timeout=10_000)
+            delay = time.monotonic() - started
+            print(f"     teammate saw the message after {delay:.2f}s")
+            if delay > 3:
+                raise AssertionError(f"teammate message took {delay:.2f}s")
+            log_busy = "() => document.querySelector('[role=log]')?.getAttribute('aria-busy') === 'true'"
+            streamed_live = False
+            deadline = time.monotonic() + 120
+            while time.monotonic() < deadline:
+                busy = await sender.evaluate(log_busy)
+                viewer_last = (await page.locator("[role=log] > *").last.inner_text()).strip()
+                if busy and viewer_last and text not in viewer_last and len(viewer_last) > 15:
+                    streamed_live = True
+                if not busy:
+                    break
+                await page.wait_for_timeout(250)
+            if not streamed_live:
+                raise AssertionError("teammate did not see the coach reply while it was streaming")
+            await page.wait_for_timeout(1500)
+            sender_last = await sender.locator("[role=log] > *").last.inner_text()
+            viewer_last = await page.locator("[role=log] > *").last.inner_text()
+            if sender_last.strip()[:80] != viewer_last.strip()[:80]:
+                raise AssertionError(f"teammate view differs after the reply: {viewer_last[:80]!r} vs {sender_last[:80]!r}")
+            await sender_context.close()
+
         for name, action in [
             ("teammate: enters the same team", enter),
             ("teammate: sees the shared team thread", shared_team_thread),
             ("teammate: cannot see the other member's personal thread", private_personal_thread),
             ("teammate: sees the same project and milestone", shared_project),
+            ("realtime: teammate sees a new team message within 3s and the same coach reply", realtime),
         ]:
             await self.step(name, action)
         await context.close()

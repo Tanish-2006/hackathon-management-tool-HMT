@@ -169,7 +169,7 @@ export default function OrganizerAnalytics(){
                   <div className="flex justify-between border-b border-[#e5e1d7] py-2"><span className="text-[#77798a]">Participants</span><b>{data.participantCount}</b></div>
                   <div className="flex justify-between border-b border-[#e5e1d7] py-2"><span className="text-[#77798a]">Teams</span><b>{data.teamCount}</b></div>
                   <div className="flex justify-between border-b border-[#e5e1d7] py-2"><span className="text-[#77798a]">Projects</span><b>{data.projectCount}</b></div>
-                  <div className="flex justify-between py-2"><span className="text-[#77798a]">Generated at</span><b className="font-mono text-[11px]">{new Date(data.generatedAt).toLocaleString()}</b></div>
+                  <div className="flex justify-between py-2"><span className="text-[#77798a]">Generated at</span><b className="font-mono text-[11px]">{new Date(data.generatedAt).toLocaleString('en-IN')}</b></div>
                 </div>
                 <Link href="/organizer/audit" className="mt-3 inline-flex text-xs font-bold text-[#5aafbd]">Audit trail →</Link>
               </Card>

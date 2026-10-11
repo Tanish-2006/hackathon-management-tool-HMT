@@ -93,7 +93,7 @@ export default function OrganizerMentors(){
                   <tr key={a.id} className="border-b border-[#e5e1d7]/60 last:border-0 hover:bg-[#f4f1e8]">
                     <td className="px-4 py-3 font-mono text-xs">{a.mentorId}</td>
                     <td className="px-4 py-3 text-xs font-semibold">{teamNameOf(a.teamId)}</td>
-                    <td className="px-4 py-3 text-xs text-[#77798a]">{new Date(a.assignedAt).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-xs text-[#77798a]">{new Date(a.assignedAt).toLocaleString('en-IN')}</td>
                     <td className="px-4 py-3 text-right"><button onClick={async()=>{ try{ const teams=await organizerApi.listMentorTeams(a.mentorId); alert(`This mentor has ${teams.length} team(s).`)}catch(e:any){alert(e.message)}}} className="rounded-lg border border-[#dedbd1] px-2 py-1 text-xs font-bold">View teams <ChevronRight size={12} className="inline"/></button></td>
                   </tr>
                 ))}

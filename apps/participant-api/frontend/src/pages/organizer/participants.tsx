@@ -77,7 +77,7 @@ export default function OrganizerParticipants(){
                     <td className="px-4 py-3 font-semibold">{p.displayName || 'Participant'}</td>
                     <td className="px-4 py-3 text-xs">{p.teamId ? <span className="rounded-full bg-[#e9e5da] px-2 py-1 text-[10px] font-bold">{teams.find((t:any)=>t.id===p.teamId)?.name || 'In a team'}</span> : <span className="text-[#77798a]">No team</span>}</td>
                     <td className="px-4 py-3"><Badge tone={p.participationStatus==='ACTIVE'?'blue':'muted'}>{p.participationStatus || '—'}</Badge></td>
-                    <td className="px-4 py-3 text-xs text-[#77798a]">{p.joinedAt ? new Date(p.joinedAt).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-3 text-xs text-[#77798a]">{p.joinedAt ? new Date(p.joinedAt).toLocaleDateString('en-IN') : '—'}</td>
                   </tr>
                 ))}
               </tbody>

@@ -27,6 +27,8 @@ export type LiveTurn = {
   reply: string;
 };
 
+export type RemoteTurn = { stage: IdeationStage | null; reply: string };
+
 const PINNED_THRESHOLD_PX = 72;
 
 function Notice({ content }: { content: string }) {
@@ -67,6 +69,7 @@ export function ChatThread({
   messages,
   phases,
   live,
+  remote = null,
   currentUserId,
   currentUserName,
   resetKey,
@@ -75,6 +78,7 @@ export function ChatThread({
   messages: IdeationMessage[];
   phases: IdeationPhase[];
   live: LiveTurn | null;
+  remote?: RemoteTurn | null;
   currentUserId: string | null;
   currentUserName: string | null;
   resetKey: string;
@@ -99,7 +103,7 @@ export function ChatThread({
   useLayoutEffect(scrollToLatest, [resetKey, scrollToLatest]);
 
   const lastId = messages[messages.length - 1]?.id;
-  const contentKey = [messages.length, lastId, live?.reply.length, live?.stage, !!live?.card, !!live?.phaseChange, !!live].join(':');
+  const contentKey = [messages.length, lastId, live?.reply.length, live?.stage, !!live?.card, !!live?.phaseChange, !!live, remote?.reply.length, remote?.stage].join(':');
   useEffect(() => {
     if (pinnedRef.current) scrollToLatest();
     else setShowJump(true);
@@ -124,7 +128,7 @@ export function ChatThread({
         tabIndex={0}
         className="h-[58vh] min-h-[340px] space-y-4 overflow-y-auto overflow-x-hidden p-3 outline-none focus-visible:ring-2 focus-visible:ring-[#f26a4f]/40 sm:p-4"
       >
-        {messages.length === 0 && !live && emptyState}
+        {messages.length === 0 && !live && !remote && emptyState}
         {renderMessages(messages, phases, currentUserId)}
         {live && (
           <>
@@ -141,6 +145,13 @@ export function ChatThread({
               <StageIndicator stage={live.stage} />
             )}
           </>
+        )}
+        {!live && remote && (
+          remote.reply ? (
+            <MessageBubble kind="assistant" content={remote.reply} streaming />
+          ) : (
+            <StageIndicator stage={remote.stage} />
+          )
         )}
       </div>
       {showJump && (

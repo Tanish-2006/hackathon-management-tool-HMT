@@ -11,7 +11,7 @@ function fmtDT(v: unknown){
   if(!v) return '—';
   const t = new Date(v as string);
   if(Number.isNaN(t.getTime())) return '—';
-  return t.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return t.toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 function Badge({ children, tone='muted' }: any){
@@ -189,7 +189,7 @@ export default function ParticipantHackathons(){
                 <div className="truncate text-sm font-bold">{r.title}</div>
                 <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-[#77798a]">
                   <span>{r.organizer ?? 'HMT'}</span><span>·</span><span>{r.mode}</span><span>·</span>
-                  <span className="inline-flex items-center gap-1"><Calendar size={11}/> {r.registrationEnd ? new Date(r.registrationEnd).toLocaleDateString() : (r.eventStart ? new Date(r.eventStart).toLocaleDateString() : '—')}</span>
+                  <span className="inline-flex items-center gap-1"><Calendar size={11}/> {r.registrationEnd ? new Date(r.registrationEnd).toLocaleDateString('en-IN') : (r.eventStart ? new Date(r.eventStart).toLocaleDateString('en-IN') : '—')}</span>
                 </div>
               </div>
               <Badge tone={r.derivedStatus==='REGISTRATION_OPEN'?'lime':r.derivedStatus==='LIVE'||r.derivedStatus==='SUBMISSION'?'coral':'muted'}>{r.derivedStatus}</Badge>
@@ -290,7 +290,7 @@ export default function ParticipantHackathons(){
                   </div>
                 )}
                 {registerMsg && <p className="mt-2 text-xs text-[#55586a]">{registerMsg}</p>}
-                <div className="mt-3 flex items-center gap-2 text-[11px] text-[#77798a]"><Clock3 size={12}/> Registration ends: {selected.registrationEnd?new Date(selected.registrationEnd).toLocaleString():'see timeline'}</div>
+                <div className="mt-3 flex items-center gap-2 text-[11px] text-[#77798a]"><Clock3 size={12}/> Registration ends: {selected.registrationEnd?new Date(selected.registrationEnd).toLocaleString('en-IN'):'see timeline'}</div>
               </div>
             </>
           ) : <div className="text-sm text-[#77798a]">Select a hackathon to see details.</div>}

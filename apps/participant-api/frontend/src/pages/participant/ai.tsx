@@ -234,7 +234,7 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
             {conversations.length ? conversations.map((c:any)=>(
               <button key={c.id} onClick={()=>setActiveId(c.id)} className={`w-full text-left rounded-xl px-3 py-2.5 border ${activeId===c.id ? 'bg-[#171a2d] text-white border-[#171a2d]' : 'bg-white border-[#e5e1d7] hover:bg-[#f4f1e8]'}`}>
                 <div className="text-xs font-bold line-clamp-1">{c.title || c.projectId || 'AI Teammate Chat'}</div>
-                <div className={`mt-1 text-[11px] ${activeId===c.id?'text-[#9b9fb1]':'text-[#77798a]'}`}>{c.createdAt ? new Date(c.createdAt).toLocaleDateString() : ''} · {c.projectId ? String(c.projectId).slice(0,6) : 'general'}</div>
+                <div className={`mt-1 text-[11px] ${activeId===c.id?'text-[#9b9fb1]':'text-[#77798a]'}`}>{c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-IN') : ''} · {c.projectId ? String(c.projectId).slice(0,6) : 'general'}</div>
               </button>
             )) : <div className="p-6 text-center"><MessageSquare size={18} className="mx-auto text-[#aaa9a2]"/><p className="mt-2 text-xs font-semibold">No conversations</p><p className="text-xs text-[#77798a]">Start a new chat to get hints.</p></div>}
           </div>
@@ -274,7 +274,7 @@ export default function ParticipantAI({ hackathonId }: { hackathonId?: string })
                 <div className="whitespace-pre-wrap">{m.content}</div>
                 {m.meta?.recommendations && <div className="mt-3 grid gap-2">{m.meta.recommendations.slice(0,3).map((r:any,idx:number)=><div key={idx} className="rounded-xl bg-[#f4f1e8] p-2.5 text-xs"><div className="font-bold">{r.title}</div><div className="text-[#77798a]">{r.action}</div><div className="mt-1 inline-flex rounded-full bg-[#d8e35b] px-2 py-0.5 text-[10px] font-bold">{r.category} · {r.impact}</div></div>)}</div>}
                 {m.meta?.privacyEnforced && <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-[11px] font-bold text-amber-700"><Lock size={12}/> Limited context</div>}
-                <div className="mt-1 text-[11px] font-mono opacity-50">{m.createdAt ? new Date(m.createdAt).toLocaleTimeString(): ''}</div>
+                <div className="mt-1 text-[11px] font-mono opacity-50">{m.createdAt ? new Date(m.createdAt).toLocaleTimeString('en-IN'): ''}</div>
               </motion.div>
             ))}
             {sending && <div className="flex items-center gap-2 text-xs text-[#77798a]"><Loader2 size={14} className="animate-spin"/> Thinking…</div>}

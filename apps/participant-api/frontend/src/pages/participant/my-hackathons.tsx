@@ -51,7 +51,7 @@ export default function MyHackathons(){
                 <h3 className="font-bold">{r.title}</h3>
                 <Badge tone={r.bucket==='live'?'coral':r.bucket==='completed'?'muted':'lime'}>{r.derivedStatus}</Badge>
               </div>
-              <div className="mt-2 flex items-center gap-2 text-xs text-[#77798a]"><Clock3 size={12}/> {r.eventEnd?`Ends ${new Date(r.eventEnd).toLocaleDateString()}`:'—'} · {r.mode} · {r.registrationStatus}</div>
+              <div className="mt-2 flex items-center gap-2 text-xs text-[#77798a]"><Clock3 size={12}/> {r.eventEnd?`Ends ${new Date(r.eventEnd).toLocaleDateString('en-IN')}`:'—'} · {r.mode} · {r.registrationStatus}</div>
               {r.bucket!=='completed' && (
                 <div className="mt-3 rounded-xl bg-[#171a2d] p-3 text-xs text-[#fdfbf5]">
                   <div className="flex items-center gap-2 font-bold"><Sparkles size={13} className="text-[#d8e35b]"/> AI Helper</div>

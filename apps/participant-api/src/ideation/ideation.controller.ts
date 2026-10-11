@@ -19,6 +19,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AiRateLimitGuard } from '../common/guards/rate-limit.guard';
 import { AiBusyError } from './asi-one.client';
 import { IdeationGuard, type GuardRejection } from './ideation.guard';
+import { IdeationHub } from './ideation.hub';
 import {
   IdeationService,
   MAX_DECK_CHARS,
@@ -29,6 +30,8 @@ import {
   type SendResult,
   type StreamEmitter,
 } from './ideation.service';
+
+const LIVE_HEARTBEAT_MS = 20_000;
 
 export class SendIdeationMessageDto {
   @ApiProperty({ enum: ['team', 'personal'] })
@@ -88,12 +91,32 @@ export class IdeationController {
   constructor(
     private readonly ideation: IdeationService,
     private readonly guard: IdeationGuard,
+    private readonly hub: IdeationHub,
   ) {}
 
   @Get(':hackathonId')
   @UseGuards(AiRateLimitGuard)
   async state(@Req() req: any, @Param('hackathonId') hackathonId: string) {
     return this.ideation.getState(req.user.id, hackathonId);
+  }
+
+  @Get(':hackathonId/live')
+  async live(@Req() req: any, @Res() reply: FastifyReply, @Param('hackathonId') hackathonId: string): Promise<void> {
+    const context = await this.ideation.resolveContext(req.user.id, hackathonId);
+    const scopes: IdeationScope[] = context.team ? ['team', 'personal'] : ['personal'];
+    const raw = this.openEventStream(reply);
+    const write = (event: string, data: unknown) => {
+      if (!raw.writableEnded) raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+    const unsubscribers = scopes.map((scope) =>
+      this.hub.subscribe(this.ideation.threadId(context, scope), (event, data) => write(event, { scope, ...(data as object) })),
+    );
+    const heartbeat = setInterval(() => !raw.writableEnded && raw.write(': ping\n\n'), LIVE_HEARTBEAT_MS);
+    raw.on('close', () => {
+      clearInterval(heartbeat);
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    });
+    write('ready', { scopes });
   }
 
   @Post(':hackathonId/messages')
@@ -141,20 +164,14 @@ export class IdeationController {
     scope: IdeationScope,
     run: (emit: StreamEmitter, signal: AbortSignal) => Promise<SendResult>,
   ): Promise<void> {
-    const phase = await this.ideation.threadPhase(this.ideation.threadId(context, scope));
-    reply.hijack();
-    const raw = reply.raw;
-    raw.writeHead(200, {
-      ...(reply.getHeaders() as Record<string, string | string[] | number>),
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
+    const threadId = this.ideation.threadId(context, scope);
+    const phase = await this.ideation.threadPhase(threadId);
+    const raw = this.openEventStream(reply);
     const abort = new AbortController();
     raw.on('close', () => abort.abort());
     const emit: StreamEmitter = (event, data) => {
       if (!raw.writableEnded) raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      if (event === 'stage' || event === 'delta') this.hub.publish(threadId, event, data);
     };
     emit('start', { phase });
     try {
@@ -175,7 +192,20 @@ export class IdeationController {
         req.log?.warn?.({ err: error }, 'ideation stream failed');
       }
     } finally {
+      this.hub.publish(threadId, 'settled', {});
       raw.end();
     }
+  }
+
+  private openEventStream(reply: FastifyReply) {
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      ...(reply.getHeaders() as Record<string, string | string[] | number>),
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    return reply.raw;
   }
 }

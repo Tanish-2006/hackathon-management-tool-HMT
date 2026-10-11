@@ -384,11 +384,11 @@ export function retryAfterSeconds(error: unknown): number | null {
   return seconds > 0 ? seconds : 1;
 }
 
-async function streamIdeation(path: string, body: unknown, onEvent: (event: IdeationStreamEvent) => void, signal?: AbortSignal): Promise<void> {
+async function readEventStream<E>(path: string, body: unknown, onEvent: (event: E) => void, signal?: AbortSignal): Promise<void> {
   const response = await participantClient.send(path, {
-    method: 'POST',
+    method: body === undefined ? 'GET' : 'POST',
     headers: { Accept: 'text/event-stream' },
-    body: JSON.stringify(body),
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     signal,
   });
   if (!response.ok || !response.body) throw toApiError(response.status, await response.text().catch(() => ''));
@@ -399,7 +399,7 @@ async function streamIdeation(path: string, body: unknown, onEvent: (event: Idea
     const event = block.match(/^event: ?(.*)$/m)?.[1]?.trim();
     const dataLines = [...block.matchAll(/^data: ?(.*)$/gm)].map((m) => m[1]);
     if (!event || !dataLines.length) return;
-    try { onEvent({ event, data: JSON.parse(dataLines.join('\n')) } as IdeationStreamEvent); } catch {}
+    try { onEvent({ event, data: JSON.parse(dataLines.join('\n')) } as E); } catch {}
   };
   for (;;) {
     const { value, done } = await reader.read();
@@ -421,7 +421,7 @@ export function streamIdeationMessage(
   onEvent: (event: IdeationStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  return streamIdeation(`/ideation/${encodeURIComponent(hackathonId)}/messages`, body, onEvent, signal);
+  return readEventStream(`/ideation/${encodeURIComponent(hackathonId)}/messages`, body, onEvent, signal);
 }
 
 export function streamDeckReview(
@@ -430,5 +430,16 @@ export function streamDeckReview(
   onEvent: (event: IdeationStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  return streamIdeation(`/ideation/${encodeURIComponent(hackathonId)}/deck`, body, onEvent, signal);
+  return readEventStream(`/ideation/${encodeURIComponent(hackathonId)}/deck`, body, onEvent, signal);
+}
+
+export type IdeationLiveEvent =
+  | { event: 'ready'; data: { scopes: IdeationScope[] } }
+  | { event: 'message'; data: IdeationMessage & { scope: IdeationScope } }
+  | { event: 'stage'; data: { scope: IdeationScope; name: IdeationStage } }
+  | { event: 'delta'; data: { scope: IdeationScope; text: string } }
+  | { event: 'settled'; data: { scope: IdeationScope } };
+
+export function watchIdeation(hackathonId: string, onEvent: (event: IdeationLiveEvent) => void, signal: AbortSignal): Promise<void> {
+  return readEventStream(`/ideation/${encodeURIComponent(hackathonId)}/live`, undefined, onEvent, signal);
 }

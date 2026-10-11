@@ -213,7 +213,7 @@ export default function OrganizerHackathonDetail(){
               {phases.map((p:any)=>(
                 <div key={p.id} className="rounded-xl border border-[#e5e1d7] bg-white p-3">
                   <div className="flex items-center justify-between"><span className="text-xs font-bold">#{p.order} {p.name}</span><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${p.status==='ACTIVE'?'bg-[#d8e35b] text-[#171a2d]': p.status==='COMPLETED'?'bg-[#5aafbd] text-white':'bg-[#f4f1e8] text-[#77798a]'}`}>{p.status}</span></div>
-                  <div className="mt-2 text-xs text-[#77798a]">{new Date(p.startsAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} → {new Date(p.endsAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                  <div className="mt-2 text-xs text-[#77798a]">{new Date(p.startsAt).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} → {new Date(p.endsAt).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
                   <div className="mt-2 flex gap-1">
                     <button onClick={async()=>{ const n=prompt('Edit phase name',p.name); if(!n) return; try{ await organizerApi.updatePhase(p.id,{name:n}); load()}catch(e:any){setActionErr(e.message)}}} disabled={hackathon.status==='ARCHIVED'} className="rounded-lg border border-[#dedbd1] px-2 py-1 text-[11px] font-semibold disabled:opacity-40"><Edit2 size={10} className="inline"/> Edit</button>
                     <button onClick={async()=>{ if(!confirm('Delete phase?')) return; try{ await organizerApi.deletePhase(p.id); setPhases(prev=>prev.filter(x=>x.id!==p.id))}catch(e:any){setActionErr(e.message)}}} disabled={hackathon.status==='ARCHIVED'} className="rounded-lg border border-[#dedbd1] px-2 py-1 text-[11px] font-semibold text-[#f26a4f] disabled:opacity-40"><Trash2 size={10} className="inline"/> Del</button>
@@ -246,7 +246,7 @@ export default function OrganizerHackathonDetail(){
         <Card className="p-6">
           <div className="flex items-center justify-between"><h3 className="font-bold flex items-center gap-2"><Users size={16}/> Mentors & assignments</h3><span className="font-mono text-xs text-[#77798a]">{assignments.length}</span></div>
           <div className="mt-4 space-y-2">
-            {assignments.length ? assignments.map((a:any)=><div key={a.id} className="flex justify-between rounded-xl border border-[#e5e1d7] bg-white px-3 py-2 text-sm"><span>Mentor for {teams.find((t:any)=>t.id===a.teamId)?.name || 'a team'}</span><span className="text-xs text-[#77798a]">{new Date(a.assignedAt).toLocaleDateString()}</span></div>) : <div className="text-xs text-[#77798a]">No mentors assigned yet.</div>}
+            {assignments.length ? assignments.map((a:any)=><div key={a.id} className="flex justify-between rounded-xl border border-[#e5e1d7] bg-white px-3 py-2 text-sm"><span>Mentor for {teams.find((t:any)=>t.id===a.teamId)?.name || 'a team'}</span><span className="text-xs text-[#77798a]">{new Date(a.assignedAt).toLocaleDateString('en-IN')}</span></div>) : <div className="text-xs text-[#77798a]">No mentors assigned yet.</div>}
           </div>
           <Link href="/organizer/mentors" className="mt-3 inline-flex text-xs font-bold text-[#5aafbd]">View all mentors <ChevronRight size={14}/></Link>
         </Card>

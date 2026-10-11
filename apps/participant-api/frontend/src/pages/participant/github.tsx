@@ -154,8 +154,8 @@ export default function ParticipantGithub(){
               </div>
               <div className="rounded-xl bg-[#252941] p-3">
                 <div className="flex items-center justify-between text-xs"><span className="text-[#9b9fb1]">AI grant</span><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${hasGrant?'bg-emerald-400 text-[#171a2d]':'bg-amber-300 text-[#171a2d]'}`}>{hasGrant?'GRANTED':'NOT GRANTED'}</span></div>
-                <div className="mt-2 text-xs text-[#b9bdca]">{hasGrant ? `Granted ${grant?.grant?.grantedAt ? new Date(grant.grant.grantedAt).toLocaleString(): ''}` : 'The AI cannot read this repository.'}</div>
-                {grant?.grant?.revokedAt && <div className="mt-1 text-xs text-red-300">Revoked {new Date(grant.grant.revokedAt).toLocaleString()}</div>}
+                <div className="mt-2 text-xs text-[#b9bdca]">{hasGrant ? `Granted ${grant?.grant?.grantedAt ? new Date(grant.grant.grantedAt).toLocaleString('en-IN'): ''}` : 'The AI cannot read this repository.'}</div>
+                {grant?.grant?.revokedAt && <div className="mt-1 text-xs text-red-300">Revoked {new Date(grant.grant.revokedAt).toLocaleString('en-IN')}</div>}
               </div>
             </div>
 
@@ -168,7 +168,7 @@ export default function ParticipantGithub(){
           <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6">
             <h3 className="font-bold flex items-center gap-2"><ShieldCheck size={16} className="text-[#5aafbd]"/> Connections</h3>
             <div className="mt-3 space-y-2">
-              {connections.length ? connections.map((c:any,i:number)=><div key={c.id||i} className="rounded-xl border border-[#e5e1d7] p-3 text-xs"><div className="font-bold">{c.githubLogin || c.login || 'github'}</div><div className="text-[#77798a]">{c.createdAt ? new Date(c.createdAt).toLocaleDateString():''}</div></div>) : <div className="rounded-xl bg-[#f4f1e8] p-3 text-xs text-[#77798a]">No connections yet.</div>}
+              {connections.length ? connections.map((c:any,i:number)=><div key={c.id||i} className="rounded-xl border border-[#e5e1d7] p-3 text-xs"><div className="font-bold">{c.githubLogin || c.login || 'github'}</div><div className="text-[#77798a]">{c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-IN'):''}</div></div>) : <div className="rounded-xl bg-[#f4f1e8] p-3 text-xs text-[#77798a]">No connections yet.</div>}
             </div>
           </div>
         </div>
