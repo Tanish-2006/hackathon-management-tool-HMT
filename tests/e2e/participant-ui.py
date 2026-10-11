@@ -13,10 +13,11 @@ BROKEN_PAGE_TEXT = ["Something went wrong", "Permission required", "Unexpected A
 
 
 class UiRun:
-    def __init__(self, base, email, member, organizer_email, organizer_password, headed):
+    def __init__(self, base, email, member, teammate, organizer_email, organizer_password, headed):
         self.base = base.rstrip("/")
         self.email = email
         self.member = member
+        self.teammate = teammate
         self.organizer_email = organizer_email
         self.organizer_password = organizer_password
         self.headed = headed
@@ -135,6 +136,7 @@ class UiRun:
                 await page.get_by_label("Send message").click()
             response = await info.value
             await response.finished()
+            await expect(page.get_by_label("Send message")).to_be_attached()
             if response.status != 200:
                 raise AssertionError(f"send returned {response.status}")
             body = await response.text()
@@ -205,6 +207,45 @@ class UiRun:
             await self.step(name, action)
         await context.close()
 
+    async def teammate_view(self, browser):
+        if not self.teammate:
+            return
+        context = await browser.new_context(viewport={"width": 1366, "height": 860})
+        page = await context.new_page()
+        self.watch(page, "teammate")
+
+        async def enter():
+            await page.goto(f"{self.base}/join")
+            await page.get_by_test_id("input-roster-email").fill(self.email)
+            await page.get_by_test_id("button-roster-find").click()
+            await page.get_by_role("button", name=self.teammate).first.click()
+            await page.wait_for_url("**/participant/ai-helper")
+
+        async def shared_team_thread():
+            await page.get_by_role("tab", name="Team").click()
+            await expect(page.get_by_text(f"UI test {self.stamp}: we think campus navigation").first).to_be_visible()
+
+        async def private_personal_thread():
+            await page.get_by_role("tab", name="Personal").click()
+            await page.wait_for_timeout(1000)
+            if await page.get_by_text(f"UI test {self.stamp}: privately").count():
+                raise AssertionError("teammate can see another member's personal thread")
+
+        async def shared_project():
+            await page.get_by_test_id("link-nav-my-project").click()
+            await self.assert_page_ok(page)
+            await expect(page.get_by_text(f"Problem statement {self.stamp}")).to_be_visible()
+            await expect(page.get_by_text(f"Milestone {self.stamp}")).to_be_visible()
+
+        for name, action in [
+            ("teammate: enters the same team", enter),
+            ("teammate: sees the shared team thread", shared_team_thread),
+            ("teammate: cannot see the other member's personal thread", private_personal_thread),
+            ("teammate: sees the same project and milestone", shared_project),
+        ]:
+            await self.step(name, action)
+        await context.close()
+
     async def organizer(self, browser):
         if not self.organizer_password:
             print("SKIP organizer: ORGANIZER_PASSWORD not set")
@@ -247,6 +288,7 @@ class UiRun:
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(headless=not self.headed, slow_mo=150 if self.headed else 0)
             await self.participant(browser)
+            await self.teammate_view(browser)
             await self.organizer(browser)
             await browser.close()
         print(f"\n{self.passes} passed, {len(self.failures)} problems")
@@ -260,8 +302,9 @@ if __name__ == "__main__":
     parser.add_argument("base")
     parser.add_argument("--email", required=True)
     parser.add_argument("--member", required=True)
+    parser.add_argument("--teammate")
     parser.add_argument("--organizer-email", default="organizer@ideathon2026.in")
     parser.add_argument("--headed", action="store_true")
     args = parser.parse_args()
-    run = UiRun(args.base, args.email, args.member, args.organizer_email, os.environ.get("ORGANIZER_PASSWORD"), args.headed)
+    run = UiRun(args.base, args.email, args.member, args.teammate, args.organizer_email, os.environ.get("ORGANIZER_PASSWORD"), args.headed)
     sys.exit(asyncio.run(run.run()))
