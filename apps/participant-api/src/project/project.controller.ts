@@ -126,10 +126,11 @@ export class ProjectController {
     });
     if (!membership)
       throw new ForbiddenException('Not owner of project (IDOR prevented)');
-    const repoUrl = await this.resolveRepoUrl(proj.hackathonId, (dto as any)?.repoUrl, proj.repoUrl);
+    const { hackathonId: _ignoredHackathonId, ...changes } = dto;
+    const repoUrl = await this.resolveRepoUrl(proj.hackathonId, changes.repoUrl, proj.repoUrl);
     const updated = await this.prisma.project.update({
       where: { id },
-      data: { ...dto, repoUrl } as any,
+      data: { ...changes, repoUrl } as any,
     } as any);
     return updated;
   }

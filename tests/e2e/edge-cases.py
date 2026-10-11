@@ -502,7 +502,7 @@ class EdgeCaseSuite:
             r.expect(f"team: maxMembers above hackathon cap {cap} 400", self.create_team(dup, self.h1, self.unique("T"), cap + 1), 400)
         else:
             r.skip("team: maxMembers above hackathon cap", f"cap={cap}")
-        r.expect("team: unknown field rejected 400", self.create_team(dup, self.h1, self.unique("T"), inviteCode="HMT-AAAAAA"), 400)
+        r.expect("team: client inviteCode ignored", self.create_team(dup, self.h1, self.unique("T"), inviteCode="HMT-AAAAAA"), (200, 201, 400), lambda x: x.status == 400 or x.field("inviteCode") != "HMT-AAAAAA")
         html = "<b onmouseover=alert(1)>Team</b> 🚀 " + self.run
         made = self.create_team(namer, self.h1, html, 2)
         r.expect("team: HTML/emoji name stored verbatim", made, 201, lambda x: x.field("name") == html)

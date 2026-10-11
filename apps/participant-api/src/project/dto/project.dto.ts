@@ -71,6 +71,7 @@ export class UpdateProjectDto {
   @ApiPropertyOptional() @IsString() @IsOptional() title?: string;
   @ApiPropertyOptional() @IsString() @IsOptional() description?: string;
   @ApiPropertyOptional() @IsString() @IsOptional() @MaxLength(4000) problemStatement?: string;
+  @ApiPropertyOptional() @IsString() @IsOptional() hackathonId?: string;
   @ApiPropertyOptional()
   @IsArray()
   @IsString({ each: true })
