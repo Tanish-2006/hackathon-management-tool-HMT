@@ -438,7 +438,12 @@ export type IdeationLiveEvent =
   | { event: 'message'; data: IdeationMessage & { scope: IdeationScope } }
   | { event: 'stage'; data: { scope: IdeationScope; name: IdeationStage } }
   | { event: 'delta'; data: { scope: IdeationScope; text: string } }
-  | { event: 'settled'; data: { scope: IdeationScope } };
+  | { event: 'settled'; data: { scope: IdeationScope } }
+  | { event: 'typing'; data: { scope: IdeationScope; userId: string; name: string } };
+
+export function notifyIdeationTyping(hackathonId: string): void {
+  participantClient.send(`/ideation/${encodeURIComponent(hackathonId)}/typing`, { method: 'POST', body: '{}' }).catch(() => undefined);
+}
 
 export function watchIdeation(hackathonId: string, onEvent: (event: IdeationLiveEvent) => void, signal: AbortSignal): Promise<void> {
   return readEventStream(`/ideation/${encodeURIComponent(hackathonId)}/live`, undefined, onEvent, signal);

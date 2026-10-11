@@ -252,10 +252,15 @@ class UiRun:
                 await viewer.get_by_role("tab", name="Team").click()
                 await expect(viewer.get_by_test_id("status-live")).to_have_text("Live", timeout=15_000)
             text = f"Realtime check {self.stamp}: who exactly gets lost on campus?"
+            typing_started = time.monotonic()
+            await sender.get_by_label("Message the AI coach").press_sequentially(text[:12], delay=40)
+            await expect(page.get_by_test_id("status-typing")).to_contain_text(f"{self.member} is typing", timeout=5_000)
+            print(f"     teammate saw the typing indicator after {time.monotonic() - typing_started:.2f}s")
             await sender.get_by_label("Message the AI coach").fill(text)
             started = time.monotonic()
             await sender.get_by_label("Send message").click()
             await expect(page.get_by_text(text)).to_be_visible(timeout=10_000)
+            await expect(page.get_by_test_id("status-typing")).to_have_count(0, timeout=3_000)
             delay = time.monotonic() - started
             print(f"     teammate saw the message after {delay:.2f}s")
             if delay > 3:
@@ -285,7 +290,7 @@ class UiRun:
             ("teammate: sees the shared team thread", shared_team_thread),
             ("teammate: cannot see the other member's personal thread", private_personal_thread),
             ("teammate: sees the same project and milestone", shared_project),
-            ("realtime: teammate sees a new team message within 3s and the same coach reply", realtime),
+            ("realtime: typing indicator, new team message within 3s, same coach reply", realtime),
         ]:
             await self.step(name, action)
         await context.close()

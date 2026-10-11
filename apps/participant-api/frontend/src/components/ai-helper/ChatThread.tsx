@@ -15,6 +15,7 @@ import { SpecialistCard } from '@/components/ai-helper/SpecialistCard';
 import { PhaseBanner } from '@/components/ai-helper/PhaseBanner';
 import { DeckMessage } from '@/components/ai-helper/DeckMessage';
 import { StageIndicator } from '@/components/ai-helper/StageIndicator';
+import { TypingIndicator } from '@/components/ai-helper/TypingIndicator';
 
 export type LiveTurn = {
   scope: IdeationScope;
@@ -70,6 +71,7 @@ export function ChatThread({
   phases,
   live,
   remote = null,
+  typing = [],
   currentUserId,
   currentUserName,
   resetKey,
@@ -79,6 +81,7 @@ export function ChatThread({
   phases: IdeationPhase[];
   live: LiveTurn | null;
   remote?: RemoteTurn | null;
+  typing?: string[];
   currentUserId: string | null;
   currentUserName: string | null;
   resetKey: string;
@@ -103,7 +106,7 @@ export function ChatThread({
   useLayoutEffect(scrollToLatest, [resetKey, scrollToLatest]);
 
   const lastId = messages[messages.length - 1]?.id;
-  const contentKey = [messages.length, lastId, live?.reply.length, live?.stage, !!live?.card, !!live?.phaseChange, !!live, remote?.reply.length, remote?.stage].join(':');
+  const contentKey = [messages.length, lastId, live?.reply.length, live?.stage, !!live?.card, !!live?.phaseChange, !!live, remote?.reply.length, remote?.stage, typing.join(',')].join(':');
   useEffect(() => {
     if (pinnedRef.current) scrollToLatest();
     else setShowJump(true);
@@ -153,6 +156,7 @@ export function ChatThread({
             <StageIndicator stage={remote.stage} />
           )
         )}
+        <TypingIndicator names={typing} />
       </div>
       {showJump && (
         <button

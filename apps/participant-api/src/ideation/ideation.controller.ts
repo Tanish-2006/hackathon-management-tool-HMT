@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
@@ -32,6 +32,7 @@ import {
 } from './ideation.service';
 
 const LIVE_HEARTBEAT_MS = 20_000;
+const TYPING_MIN_GAP_MS = 1000;
 
 export class SendIdeationMessageDto {
   @ApiProperty({ enum: ['team', 'personal'] })
@@ -88,6 +89,8 @@ export class ReviewDeckDto {
 @Controller('ideation')
 @UseGuards(JwtAuthGuard)
 export class IdeationController {
+  private readonly lastTyping = new Map<string, number>();
+
   constructor(
     private readonly ideation: IdeationService,
     private readonly guard: IdeationGuard,
@@ -117,6 +120,18 @@ export class IdeationController {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     });
     write('ready', { scopes });
+  }
+
+  @Post(':hackathonId/typing')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async typing(@Req() req: any, @Param('hackathonId') hackathonId: string): Promise<void> {
+    const key = `${hackathonId}:${req.user.id}`;
+    const now = Date.now();
+    if (now - (this.lastTyping.get(key) ?? 0) < TYPING_MIN_GAP_MS) return;
+    this.lastTyping.set(key, now);
+    const context = await this.ideation.resolveContext(req.user.id, hackathonId);
+    if (!context.team) return;
+    this.hub.publish(this.ideation.threadId(context, 'team'), 'typing', { userId: context.userId, name: context.userName });
   }
 
   @Post(':hackathonId/messages')

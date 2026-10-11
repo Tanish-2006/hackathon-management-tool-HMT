@@ -8,6 +8,7 @@ import {
   streamDeckReview,
   streamIdeationMessage,
   watchIdeation,
+  notifyIdeationTyping,
   type IdeationDeckSlide,
   type IdeationLiveEvent,
   type IdeationMessage,
@@ -25,6 +26,8 @@ import { DeckUpload } from '@/components/ai-helper/DeckUpload';
 
 const POLL_INTERVAL_MS = 15000;
 const RECONNECT_MAX_MS = 15000;
+const TYPING_PING_MS = 2500;
+const TYPING_VISIBLE_MS = 4000;
 const DEFAULT_MAX_CHARS = 4000;
 const DECK_PHASE = 6;
 const SCOPES: Array<{ value: IdeationScope; label: string; Icon: typeof Users }> = [
@@ -105,6 +108,8 @@ export default function ParticipantAIHelper() {
   const connectedRef = useRef(false);
   const [connected, setConnected] = useState(false);
   const [remote, setRemote] = useState<Record<IdeationScope, RemoteTurn | null>>({ team: null, personal: null });
+  const [typers, setTypers] = useState<Record<string, { name: string; until: number }>>({});
+  const lastTypingPingRef = useRef(0);
   const epochRef = useRef(0);
 
   const load = useCallback(async (silent: boolean) => {
@@ -145,6 +150,18 @@ export default function ParticipantAIHelper() {
 
   const onLive = useCallback((event: IdeationLiveEvent) => {
     if (event.event === 'ready') return;
+    if (event.event === 'typing') {
+      if (event.data.userId !== user?.id) setTypers((t) => ({ ...t, [event.data.userId]: { name: event.data.name, until: Date.now() + TYPING_VISIBLE_MS } }));
+      return;
+    }
+    if (event.event === 'message' && event.data.authorId) {
+      const authorId = event.data.authorId;
+      setTypers((t) => {
+        if (!(authorId in t)) return t;
+        const { [authorId]: _gone, ...rest } = t;
+        return rest;
+      });
+    }
     const { scope } = event.data;
     if (streamingRef.current && liveScopeRef.current === scope) return;
     if (event.event === 'message') {
@@ -159,7 +176,29 @@ export default function ParticipantAIHelper() {
       setRemote((r) => ({ ...r, [scope]: null }));
       load(true);
     }
-  }, [load]);
+  }, [load, user?.id]);
+
+  const typingActive = Object.keys(typers).length > 0;
+  useEffect(() => {
+    if (!typingActive) return;
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setTypers((t) => {
+        const live = Object.entries(t).filter(([, v]) => v.until > now);
+        return live.length === Object.keys(t).length ? t : Object.fromEntries(live);
+      });
+    }, 500);
+    return () => clearInterval(timer);
+  }, [typingActive]);
+
+  function changeDraft(value: string) {
+    setDraft(value);
+    const now = Date.now();
+    if (hackathonId && activeScope === 'team' && state?.team && value.trim() && now - lastTypingPingRef.current > TYPING_PING_MS) {
+      lastTypingPingRef.current = now;
+      notifyIdeationTyping(hackathonId);
+    }
+  }
 
   useEffect(() => {
     if (!hackathonId || !ctx.selectedIsRegistered) return;
@@ -380,6 +419,7 @@ export default function ParticipantAIHelper() {
                     phases={state.phases}
                     live={liveHere}
                     remote={liveHere ? null : remote[activeScope]}
+                    typing={activeScope === 'team' ? Object.values(typers).map((t) => t.name) : []}
                     currentUserId={user?.id ?? null}
                     currentUserName={userName}
                     resetKey={`${hackathonId}:${activeScope}`}
@@ -400,7 +440,7 @@ export default function ParticipantAIHelper() {
                   )}
                   <Composer
                     value={draft}
-                    onChange={setDraft}
+                    onChange={changeDraft}
                     onSubmit={send}
                     maxChars={maxChars}
                     streaming={streaming}
