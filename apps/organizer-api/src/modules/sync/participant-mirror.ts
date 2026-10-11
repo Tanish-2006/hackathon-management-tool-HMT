@@ -1,7 +1,7 @@
 import { resolveSyncSecret } from '@hmt/config';
 import { memoryStore } from '../../store/memory.store';
 
-type Row = { id: string };
+type Row = { id: string; [field: string]: unknown };
 type Snapshot = Record<'participants' | 'teams' | 'teamMembers' | 'projects', Row[]>;
 
 const COLLECTIONS = ['participants', 'teams', 'teamMembers', 'projects'] as const;
