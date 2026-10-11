@@ -37,7 +37,7 @@ import MentorProfile from '@/pages/mentor/profile';
 const cn = (...parts: Array<string | false | undefined>) => parts.filter(Boolean).join(' ');
 
 function Logo({ inverse = false }: { inverse?: boolean }) {
-  return <Link href="/dashboard" className="flex items-center gap-2.5" data-testid="link-logo"><span className={cn('grid h-8 w-8 place-items-center rounded-[9px] text-sm font-bold', inverse ? 'bg-[#d8e35b] text-[#171a2d]' : 'bg-[#f26a4f] text-[#fdfbf5]')}>H</span><span className="text-[17px] font-bold tracking-[-.04em]">HMT<span className={inverse ? 'text-[#d8e35b]' : 'text-[#f26a4f]'}>.</span></span></Link>;
+  return <Link href="/dashboard" className="flex items-center gap-2.5" data-testid="link-logo"><svg viewBox="0 0 32 32" className="h-8 w-8 shrink-0" aria-hidden="true"><rect width="32" height="32" rx="9" fill={inverse ? '#d8e35b' : '#f26a4f'} /><g fill={inverse ? '#171a2d' : '#fdfbf5'}><rect x="8.5" y="8" width="4.5" height="16" rx="2.25" /><rect x="19" y="12.5" width="4.5" height="11.5" rx="2.25" /><rect x="10" y="14.5" width="12" height="3.5" rx="1.75" /><path d="M20.9 4.2Q21.6 6.9 24.3 7.6Q21.6 8.3 20.9 11Q20.2 8.3 17.5 7.6Q20.2 6.9 20.9 4.2Z" /></g></svg><span className="text-[17px] font-bold tracking-[-.04em]">HMT<span className={inverse ? 'text-[#d8e35b]' : 'text-[#f26a4f]'}>.</span></span></Link>;
 }
 
 const participantNav = [
