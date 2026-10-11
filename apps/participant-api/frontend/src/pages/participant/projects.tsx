@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FileText, Github, Layers, ExternalLink, ShieldCheck, Loader2, AlertCircle, Check, X, Edit3, Save, Plus, Users, Calendar, Target, Trophy } from 'lucide-react';
+import { FileText, Github, Layers, ExternalLink, ShieldCheck, Loader2, AlertCircle, Check, X, Edit3, Save, Plus, Users, Calendar, Target, Trophy, Sparkles } from 'lucide-react';
 import { hmtBackendService, ApiError } from '@/services/backendApi';
 import { useHackathonContext } from '@/hooks/use-hackathon-context';
 
@@ -205,6 +205,7 @@ export default function ParticipantProjects(){
                     {milestones.length ? milestones.map((m:any)=><div key={m.id} className="flex items-center justify-between rounded-xl border border-[#e5e1d7] px-3 py-2.5"><div><div className="text-xs font-bold">{m.title}</div><div className="text-xs text-[#77798a]">{m.description||''}</div></div><div className="text-[11px] font-mono text-[#77798a]">{m.dueDate ? new Date(m.dueDate).toLocaleDateString():''}</div></div>) : <div className="rounded-xl bg-[#f4f1e8] p-3 text-xs text-[#77798a]">No milestones yet. Add shipping checkpoints.</div>}
                   </div>
                 </div>
+                <div className="mt-6 flex justify-end"><Link href="/participant/ai-helper" className="inline-flex items-center gap-2 rounded-xl bg-[#f26a4f] px-4 py-2.5 text-xs font-bold text-[#fdfbf5] transition-transform hover:-translate-y-0.5" data-testid="link-project-chat-ai"><Sparkles size={14}/> Chat with AI</Link></div>
               </>
             )}
           </div>

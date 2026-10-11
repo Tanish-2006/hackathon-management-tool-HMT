@@ -14,6 +14,7 @@ export default {
       headers,
       body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
       redirect: 'manual',
+      cache: 'no-store',
     });
 
     const responseHeaders = new Headers(upstream.headers);
