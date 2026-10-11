@@ -39,12 +39,12 @@ class IdeathonSetup:
 
     def organizer(self, email):
         password = os.environ.get("ORGANIZER_PASSWORD") or secrets.token_urlsafe(12)
-        status, body = self.api.call("POST", "/organizer/api/v1/auth/register", {
-            "email": email, "password": password, "fullName": "Ideathon Organizer",
-            "displayName": "Ideathon Organizer", "role": "ORGANIZER", "phoneNumber": "+919999900001",
-        })
-        if status == 409:
-            status, body = self.api.call("POST", "/organizer/api/v1/auth/login", {"email": email, "password": password})
+        status, body = self.api.call("POST", "/organizer/api/v1/auth/login", {"email": email, "password": password})
+        if status != 200:
+            status, body = self.api.call("POST", "/organizer/api/v1/auth/register", {
+                "email": email, "password": password, "fullName": "Ideathon Organizer",
+                "displayName": "Ideathon Organizer", "role": "ORGANIZER", "phoneNumber": "+919999900001",
+            })
         return self.expect("organizer account", status, body)["accessToken"], password
 
     def publish(self, token):
