@@ -3,6 +3,7 @@ import {
   UnauthorizedException,
   ConflictException,
   BadRequestException,
+  ForbiddenException,
   NotFoundException,
   HttpException,
   HttpStatus,
@@ -62,6 +63,9 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto) {
+    if (process.env.SIGNUP_CLOSED === 'true') {
+      throw new ForbiddenException('Sign-up is closed. Shortlisted teams enter with their team lead email.');
+    }
     const existing = await this.prisma.user.findUnique({
       where: { email: dto.email.toLowerCase() },
     });
@@ -184,6 +188,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    return this.startSession(user);
+  }
+
+  async startSession(user: any) {
     const tokens = await this.generateTokenPair(user.id, user.email, user.role);
     await this.prisma.auditLog.create({
       data: {

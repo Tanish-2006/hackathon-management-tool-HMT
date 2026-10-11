@@ -11,13 +11,15 @@ class Api:
         self.base = base.rstrip("/")
         self.origin = origin
 
-    def call(self, method, path, body=None, token=None, raw=False):
+    def call(self, method, path, body=None, token=None, raw=False, headers=None):
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.base + path, data=data, method=method)
         req.add_header("Content-Type", "application/json")
         req.add_header("Origin", self.origin)
         if token:
             req.add_header("Authorization", f"Bearer {token}")
+        for name, value in (headers or {}).items():
+            req.add_header(name, value)
         try:
             with urllib.request.urlopen(req, timeout=120) as res:
                 text = res.read().decode()

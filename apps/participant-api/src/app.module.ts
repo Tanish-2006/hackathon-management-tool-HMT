@@ -18,6 +18,7 @@ import { GitHubModule } from './github/github.module';
 import { SyncModule } from './sync/sync.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { IdeationModule } from './ideation/ideation.module';
+import { RosterModule } from './roster/roster.module';
 
 /**
  * Root application module — organizes feature domains into isolated modules.
@@ -44,6 +45,7 @@ import { IdeationModule } from './ideation/ideation.module';
     SyncModule,
     NotificationsModule,
     IdeationModule,
+    RosterModule,
   ],
 })
 export class AppModule {}

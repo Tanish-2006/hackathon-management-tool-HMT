@@ -165,9 +165,13 @@ export type AuthResponse = {
   phoneOtp?: string;
 };
 
+export type RosterTeam = { id: string; number: number; name: string; members: { id: string; name: string }[] };
+
 export const hmtBackendService = {
   async register(data: RegisterInput): Promise<AuthResponse> { return participantClient.startSession('/auth/register', data); },
   async login(credentials: LoginInput): Promise<AuthResponse> { return participantClient.startSession('/auth/login', credentials); },
+  async rosterLookup(email: string): Promise<{ teams: RosterTeam[] }> { return participantClient.request('/roster/lookup', { method: 'POST', body: JSON.stringify({ email }) }, false); },
+  async rosterEnter(email: string, memberId: string): Promise<AuthResponse> { return participantClient.startSession('/roster/enter', { email, memberId }); },
   async getMe(): Promise<MeResponse> { const res = await fetchWithAuth('/auth/me'); return unwrap<MeResponse>(res); },
   async refresh(refreshToken?: string): Promise<AuthResponse> { return participantClient.refresh(refreshToken); },
   async requestPhoneOtp(phoneNumber: string): Promise<{ message: string; expiresIn?: string; phoneOtp?: string }> {

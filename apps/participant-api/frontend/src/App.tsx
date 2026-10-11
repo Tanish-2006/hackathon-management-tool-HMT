@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, Redirect, Route, Router as WouterRouter, Switch, useLocation } from 'wouter';
 import { BarChart3, Bell, Check, ChevronDown, ClipboardCheck, FileText, Flag, LayoutDashboard, LogOut, Menu, Plus, Search, Settings2, ShieldCheck, Sparkles, Users, X } from 'lucide-react';
-import { getSessionApi, hmtBackendService } from '@/services/backendApi';
+import { getSessionApi, hmtBackendService, type RosterTeam } from '@/services/backendApi';
 import { organizerApi } from '@/services/organizerApi';
 import { AuthProvider, displayNameOf, initialsOf, useAuth, type HmtRole } from '@/services/auth-context';
 import NotFound from '@/pages/not-found';
@@ -270,7 +270,45 @@ function Auth({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
     return <AuthFrame><div className="mx-auto max-w-md"><div className="mb-10 text-center"><div className="mx-auto w-fit"><Logo /></div><h1 className="mt-8 text-3xl font-bold tracking-[-.06em]">Verify your number.</h1><p className="mt-2 text-sm text-[#77798a]">We sent a 6-digit code to {pendingPhone}.</p></div><VerifyPhonePanel phone={pendingPhone} hint={pendingHint} kind={pendingKind} onVerified={() => { setPendingPhone(null); setPendingHint(null); }} /></div></AuthFrame>;
   }
 
-  return <AuthFrame><div className="mx-auto max-w-md"><div className="mb-10 text-center"><div className="mx-auto w-fit"><Logo /></div><h1 className="mt-8 text-3xl font-bold tracking-[-.06em]">{mode === 'forgot' ? 'Reset your access.' : isRegister ? 'Make room for ideas.' : 'Welcome back, builder.'}</h1><p className="mt-2 text-sm text-[#77798a]">{mode === 'forgot' ? 'No drama. We will get you back in.' : 'Your next great weekend starts here.'}</p></div>{mode !== 'forgot' && <div className="mb-5 flex gap-2 rounded-xl bg-[#e9e5da] p-1" role="group" aria-label="Account type">{(['Participant', 'Organizer', 'Mentor'] as const).map(r => <button key={r} type="button" onClick={() => setAccountType(r)} className={cn('flex-1 rounded-lg py-2 text-[10px] font-bold', accountType === r ? 'bg-[#fdfbf5] shadow-sm' : 'text-[#77798a]')} data-testid={`button-auth-role-${r.toLowerCase()}`}>{r}</button>)}</div>}{errorMsg && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-600" role="alert">{errorMsg}</div>}<form onSubmit={handleSubmit} className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6" noValidate>{isRegister && <Field label="Full name" required><input className="hmt-input" value={name} onChange={e => setName(e.target.value)} placeholder="Your full name" required autoComplete="name" data-testid="input-full-name" /></Field>}<Field label="Email" required><input type="email" className="hmt-input" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" required autoComplete="email" data-testid="input-auth-email" /></Field>{isRegister && <Field label="Phone number" required><input type="tel" className="hmt-input" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+919876543210" required autoComplete="tel" data-testid="input-auth-phone" /></Field>}{mode !== 'forgot' && <Field label="Password" required><input type="password" minLength={8} className="hmt-input" value={password} onChange={e => setPassword(e.target.value)} placeholder="8+ characters" required autoComplete={isRegister ? 'new-password' : 'current-password'} data-testid="input-auth-password" /></Field>}<button disabled={loading} className="mt-2 w-full rounded-xl bg-[#f26a4f] px-4 py-3.5 text-sm font-bold text-[#fdfbf5] disabled:opacity-50" data-testid={`button-submit-${mode}`}>{loading ? 'Connecting...' : (mode === 'forgot' ? 'Send reset link' : isRegister ? `Create ${accountType} account` : `Sign in as ${accountType}`)}</button></form><div className="mt-4 text-center text-xs text-[#77798a]">{mode === 'login' ? <span>New here? <Link href="/register" className="font-bold text-[#f26a4f]">Create an account</Link> · <Link href="/forgot-password" className="font-bold text-[#f26a4f]">Forgot password</Link></span> : mode === 'register' ? <span>Have an account? <Link href="/login" className="font-bold text-[#f26a4f]">Sign in</Link></span> : <span><Link href="/login" className="font-bold text-[#f26a4f]">Back to sign in</Link></span>}</div></div></AuthFrame>;
+  return <AuthFrame><div className="mx-auto max-w-md"><div className="mb-10 text-center"><div className="mx-auto w-fit"><Logo /></div><h1 className="mt-8 text-3xl font-bold tracking-[-.06em]">{mode === 'forgot' ? 'Reset your access.' : isRegister ? 'Make room for ideas.' : 'Welcome back, builder.'}</h1><p className="mt-2 text-sm text-[#77798a]">{mode === 'forgot' ? 'No drama. We will get you back in.' : 'Your next great weekend starts here.'}</p></div>{mode !== 'forgot' && <div className="mb-5 flex gap-2 rounded-xl bg-[#e9e5da] p-1" role="group" aria-label="Account type">{(['Participant', 'Organizer'] as const).map(r => <button key={r} type="button" onClick={() => setAccountType(r)} className={cn('flex-1 rounded-lg py-2 text-[10px] font-bold', accountType === r ? 'bg-[#fdfbf5] shadow-sm' : 'text-[#77798a]')} data-testid={`button-auth-role-${r.toLowerCase()}`}>{r}</button>)}</div>}{mode === 'login' && accountType === 'Participant' ? <RosterJoin /> : <>{errorMsg && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-600" role="alert">{errorMsg}</div>}<form onSubmit={handleSubmit} className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6" noValidate>{isRegister && <Field label="Full name" required><input className="hmt-input" value={name} onChange={e => setName(e.target.value)} placeholder="Your full name" required autoComplete="name" data-testid="input-full-name" /></Field>}<Field label="Email" required><input type="email" className="hmt-input" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" required autoComplete="email" data-testid="input-auth-email" /></Field>{isRegister && <Field label="Phone number" required><input type="tel" className="hmt-input" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+919876543210" required autoComplete="tel" data-testid="input-auth-phone" /></Field>}{mode !== 'forgot' && <Field label="Password" required><input type="password" minLength={8} className="hmt-input" value={password} onChange={e => setPassword(e.target.value)} placeholder="8+ characters" required autoComplete={isRegister ? 'new-password' : 'current-password'} data-testid="input-auth-password" /></Field>}<button disabled={loading} className="mt-2 w-full rounded-xl bg-[#f26a4f] px-4 py-3.5 text-sm font-bold text-[#fdfbf5] disabled:opacity-50" data-testid={`button-submit-${mode}`}>{loading ? 'Connecting...' : (mode === 'forgot' ? 'Send reset link' : isRegister ? `Create ${accountType} account` : `Sign in as ${accountType}`)}</button></form><div className="mt-4 text-center text-xs text-[#77798a]">{mode === 'login' ? <Link href="/forgot-password" className="font-bold text-[#f26a4f]">Forgot password</Link> : <Link href="/login" className="font-bold text-[#f26a4f]">Back to sign in</Link>}</div></>}</div></AuthFrame>;
+}
+function RosterJoin() {
+  const { refreshAuth } = useAuth();
+  const [, setLocation] = useLocation();
+  const [email, setEmail] = useState('');
+  const [teams, setTeams] = useState<RosterTeam[] | null>(null);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const failure = (err: any, fallback: string) => err?.status === 429 ? 'Too many attempts. Wait a minute and try again.' : err?.message || fallback;
+
+  const find = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim()) { setErrorMsg("Enter your team lead's email."); return; }
+    setErrorMsg('');
+    setBusy('find');
+    try { setTeams((await hmtBackendService.rosterLookup(email.trim())).teams); }
+    catch (err: any) { setErrorMsg(failure(err, 'Something went wrong. Try again.')); }
+    finally { setBusy(null); }
+  };
+
+  const enter = async (memberId: string) => {
+    setErrorMsg('');
+    setBusy(memberId);
+    try {
+      await hmtBackendService.rosterEnter(email.trim(), memberId);
+      await refreshAuth();
+      setLocation('/participant/ai-helper');
+    } catch (err: any) {
+      setErrorMsg(failure(err, 'Could not sign you in. Try again.'));
+      setBusy(null);
+    }
+  };
+
+  const alert = errorMsg && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-600" role="alert" data-testid="text-roster-error">{errorMsg}</div>;
+
+  if (teams) return <div>{alert}<div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6"><h2 className="text-lg font-bold tracking-[-.03em]">Who are you?</h2><p className="mt-1 text-xs text-[#77798a]">Tap your name to enter your team.</p>{teams.map(team => <div key={team.id} className="mt-5"><div className="mb-2 font-mono-ui text-[10px] uppercase tracking-[.14em] text-[#77798a]">Idea {team.number} · {team.name}</div><div className="grid gap-2">{team.members.map(m => <button key={m.id} type="button" disabled={busy !== null} onClick={() => enter(m.id)} className="flex items-center justify-between rounded-xl border border-[#dedbd1] bg-white px-4 py-3 text-left text-sm font-semibold transition-colors hover:border-[#f26a4f] disabled:opacity-50" data-testid={`button-member-${m.id}`}><span>{m.name}</span><span className="text-xs text-[#f26a4f]">{busy === m.id ? 'Entering…' : 'Enter →'}</span></button>)}</div></div>)}</div><button type="button" onClick={() => { setTeams(null); setErrorMsg(''); }} className="mt-4 w-full text-center text-xs font-bold text-[#f26a4f]" data-testid="button-roster-back">Use a different email</button></div>;
+
+  return <div>{alert}<form onSubmit={find} className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-6" noValidate><Field label="Team lead email" required><input type="email" className="hmt-input" value={email} onChange={e => setEmail(e.target.value)} placeholder="lead@example.com" required autoComplete="email" data-testid="input-roster-email" /></Field><p className="-mt-2 mb-5 text-xs leading-5 text-[#77798a]">Use the email your team lead gave on the Ideathon registration form.</p><button disabled={busy !== null} className="w-full rounded-xl bg-[#f26a4f] px-4 py-3.5 text-sm font-bold text-[#fdfbf5] disabled:opacity-50" data-testid="button-roster-find">{busy === 'find' ? 'Finding your team…' : 'Find my team'}</button></form></div>;
 }
 function VerifyPhonePanel({ phone, hint, kind, onVerified }: { phone: string; hint: string | null; kind: 'participant' | 'organizer'; onVerified: () => void }) {
   const { refreshAuth } = useAuth();
@@ -400,11 +438,11 @@ function AppRoutes() { return <Switch>
 <Route path="/mentor/feedback">{() => <RequireMentor><MentorFeedback /></RequireMentor>}</Route>
 <Route path="/mentor/profile">{() => <RequireMentor><MentorProfile /></RequireMentor>}</Route>
 <Route path="/mentor">{() => <RequireMentor><MentorDashboard /></RequireMentor>}</Route>
-{['/hackathon/:id', '/judge', '/leaderboard', '/sponsors'].map(path => <Route key={path} path={path}><Redirect to="/dashboard" /></Route>)}<Route path="/login">{() => <Auth mode="login" />}</Route><Route path="/register">{() => <Auth mode="register" />}</Route><Route path="/forgot-password">{() => <Auth mode="forgot" />}</Route><Route component={NotFound} /></Switch>; }
+{['/hackathon/:id', '/judge', '/leaderboard', '/sponsors'].map(path => <Route key={path} path={path}><Redirect to="/dashboard" /></Route>)}<Route path="/login">{() => <Auth mode="login" />}</Route><Route path="/join">{() => <Auth mode="login" />}</Route><Route path="/register"><Redirect to="/login" /></Route><Route path="/forgot-password">{() => <Auth mode="forgot" />}</Route><Route component={NotFound} /></Switch>; }
 function App() {
   const [location] = useLocation();
   const { initializing } = useAuth();
-  const auth = ['/login', '/register', '/forgot-password'].includes(location);
+  const auth = ['/login', '/join', '/forgot-password'].includes(location);
   if (initializing && !auth) {
     return <div className="grid min-h-[100dvh] place-items-center bg-[#f4f1e8] text-sm text-[#77798a]"><span className="inline-flex items-center gap-2"><span className="h-4 w-4 animate-spin rounded-full border-2 border-[#dedbd1] border-t-[#171a2d]" /> Verifying session…</span></div>;
   }

@@ -54,6 +54,9 @@ export class AuthService {
   }
 
   async register(data: RegisterData) {
+    if (process.env.SIGNUP_CLOSED === 'true') {
+      throw Object.assign(new Error('Sign-up is closed'), { statusCode: 403 });
+    }
     const email = data.email.toLowerCase();
     const existing = Array.from(memoryStore.users.values()).find((u) => u.email === email);
     if (existing) {
