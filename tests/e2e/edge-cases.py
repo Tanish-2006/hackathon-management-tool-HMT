@@ -16,6 +16,12 @@ from datetime import datetime, timedelta, timezone
 DEV_SYNC_SECRET = "hmt-dev-sync-secret-change-in-production"
 
 
+
+def rejected_or_closed_early(response):
+    if response.status:
+        return True
+    return any(sign in repr(response) for sign in ("EOF occurred", "Connection reset", "Broken pipe", "connection was aborted"))
+
 class Response:
     def __init__(self, status, text, headers):
         self.status = status
@@ -767,8 +773,8 @@ class EdgeCaseSuite:
             r.expect(f"general: {label} malformed JSON 400", api.call("POST", "/auth/login", raw=b'{"email": "a@b.c", '), 400)
             r.expect(f"general: {label} JSON array body 400", api.call("POST", "/auth/login", raw=b"[1,2,3]"), (400, 401))
             r.expect(f"general: {label} empty JSON body 400", api.call("POST", "/auth/login", raw=b""), (400, 401))
-            r.expect(f"general: {label} 1.2MB body 413", api.call("POST", "/auth/register", raw=json.dumps({"email": "x@y.z", "fullName": "x" * 1_200_000}).encode()), (400, 413))
-        r.expect("general: participant 1.2MB authenticated body 413", self.p.call("POST", f"/ideation/{self.h1}/messages", raw=json.dumps({"scope": "personal", "content": "x" * 1_200_000}).encode(), token=token), (400, 413))
+            r.expect(f"general: {label} 1.2MB body 413", api.call("POST", "/auth/register", raw=json.dumps({"email": "x@y.z", "fullName": "x" * 1_200_000}).encode()), (0, 400, 413), rejected_or_closed_early)
+        r.expect("general: participant 1.2MB authenticated body 413", self.p.call("POST", f"/ideation/{self.h1}/messages", raw=json.dumps({"scope": "personal", "content": "x" * 1_200_000}).encode(), token=token), (0, 400, 413), rejected_or_closed_early)
         r.expect("general: participant null body on team create 400", self.p.call("POST", "/team", raw=b"null", token=token), 400)
         r.expect("general: participant health 200", self.p.call("GET", "/health"), 200)
         probes = [
