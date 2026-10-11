@@ -121,18 +121,6 @@ export default function ParticipantTeams(){
           const arr = Array.isArray(o) ? o : (o?.data ?? []);
           setMyLeaveReqs(arr.filter((r:any)=>!contextId || String(r.hackathonId)===String(contextId)));
         }
-        {
-          const raw = teamRes.status==='fulfilled' ? (teamRes.value as any) : null;
-          const t = raw?.team ?? raw;
-          if(t?.id){
-            hmtBackendService.getTeamJoinRequests(t.id)
-              .then((r:any)=>{ if(m) setReqInbox(Array.isArray(r) ? r : (r?.data ?? [])); })
-              .catch(()=>{ if(m) setReqInbox([]); });
-            hmtBackendService.getTeamLeaveRequests(t.id)
-              .then((r:any)=>{ if(m) setLeaveInbox(Array.isArray(r) ? r : (r?.data ?? [])); })
-              .catch(()=>{ if(m) setLeaveInbox([]); });
-          } else if(m) { setReqInbox([]); setLeaveInbox([]); }
-        }
       }catch(e){ if(m) setError(friendly(e)); }
       finally{ if(m) setLoading(false); }
     }

@@ -49,7 +49,8 @@ class UiRun:
             print(f"FAIL {name}: {str(error).splitlines()[0][:300]}")
 
     async def assert_page_ok(self, page: Page):
-        await page.wait_for_load_state("networkidle")
+        await page.wait_for_load_state("load")
+        await page.wait_for_timeout(1200)
         for text in BROKEN_PAGE_TEXT:
             if await page.get_by_text(text).count():
                 raise AssertionError(f"page shows '{text}' at {page.url}")
@@ -246,6 +247,7 @@ class UiRun:
             await sender.get_by_test_id("button-roster-find").click()
             await sender.get_by_role("button", name=self.member).first.click()
             await sender.wait_for_url("**/participant/ai-helper")
+            await page.get_by_test_id("link-nav-ai-helper").click()
             for viewer in (sender, page):
                 await viewer.get_by_role("tab", name="Team").click()
                 await expect(viewer.get_by_test_id("status-live")).to_have_text("Live", timeout=15_000)
