@@ -1,10 +1,22 @@
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { defaultIdeationConfig } from '@hmt/contracts';
-import { AI_HELPER_NOT_CONFIGURED, AiBusyError, AsiOneClient } from './asi-one.client';
-import { IdeationService, type BuildMessagesInput } from './ideation.service';
+import { PrismaService } from '../database/prisma.service';
+import { AiBusyError } from './asi-one.client';
+import { IdeationGuard } from './ideation.guard';
+import { CoachPrompt, type CoachInput } from './ideation.prompt';
+import { IdeationRouter } from './ideation.router';
+import { IdeationService, type IdeationContext } from './ideation.service';
 
-const service = new IdeationService({} as any, { configured: true } as any);
+const team = {
+  id: 't1',
+  name: 'Rocket',
+  members: [
+    { id: 'u1', name: 'Asha' },
+    { id: 'u2', name: 'Ben' },
+  ],
+};
 
-function input(overrides: Partial<BuildMessagesInput> = {}): BuildMessagesInput {
+function input(overrides: Partial<CoachInput> = {}): CoachInput {
   return {
     hackathon: {
       id: 'h1',
@@ -15,146 +27,373 @@ function input(overrides: Partial<BuildMessagesInput> = {}): BuildMessagesInput 
     },
     config: {
       ...defaultIdeationConfig(),
-      currentRound: 2,
       extraInstructions: 'Mention the campus innovation cell.',
     },
     scope: 'team',
-    team: {
-      id: 't1',
-      name: 'Rocket',
-      members: [
-        { id: 'u1', name: 'Asha' },
-        { id: 'u2', name: 'Ben' },
-      ],
-    },
+    team,
     participantName: 'Asha',
+    phase: 2,
+    move: null,
     history: [],
-    userTurn: { content: 'Here is our user persona', authorName: 'Asha' },
+    brief: null,
+    offTopic: false,
+    turn: { content: 'Here is our user persona', authorName: 'Asha' },
+    deckReview: false,
     ...overrides,
   };
 }
 
-describe('IdeationService.buildMessages', () => {
-  it('scopes the system prompt to the organizer-selected round', () => {
-    const [system] = service.buildMessages(input());
-    expect(system.role).toBe('system');
-    expect(system.content).toContain('Current round: 2 of 5 — Users & Validation');
-    expect(system.content).toContain(
-      'Upcoming rounds (do not start these): 3. Solution & Differentiation; 4. Feasibility & Business Model; 5. Pitch & Final Refinement',
+const userMsg = (content: string, phase: number, authorName = 'Ben') => ({
+  kind: 'user',
+  role: 'user',
+  content,
+  authorName,
+  phase,
+});
+
+describe('CoachPrompt', () => {
+  it('encodes the honesty and coaching rules', () => {
+    const system = CoachPrompt.system(input());
+    expect(system).toMatch(/honest and unbiased/i);
+    expect(system).toMatch(/no flattery/i);
+    expect(system).toMatch(/at most 3 questions/i);
+    expect(system).toContain(
+      'Never write the idea, the solution, the pitch, the script or the slides',
     );
-    expect(system.content).toContain(
-      'Rounds already completed (build on them, do not redo them): 1. Problem Discovery',
-    );
-    expect(system.content).toContain('Stay strictly inside round 2');
-    expect(system.content).not.toContain('Goal: Pin down one specific');
-    expect(system.content).toContain('Campus Ideathon');
-    expect(system.content).toContain('Reduce food waste in hostels');
-    expect(system.content).toContain('Sustainability');
-    expect(system.content).toContain('Mention the campus innovation cell.');
-    expect(system.content).toContain('members: Asha, Ben');
+    expect(system).toContain('Never invent sources');
+    expect(system).toContain('Mention the campus innovation cell.');
+    expect(system).toContain('Reduce food waste in hostels');
   });
 
-  it('caps history at the last 30 messages', () => {
-    const history = Array.from({ length: 45 }, (_, i) => ({
-      role: (i % 2 ? 'assistant' : 'user') as 'user' | 'assistant',
-      content: `m${i}`,
-      authorName: i % 2 ? 'AI Helper' : 'Ben',
-    }));
-    const messages = service.buildMessages(input({ history }));
+  it('scopes to the current phase goal, questions and exit check', () => {
+    const phases = defaultIdeationConfig().phases;
+    const system = CoachPrompt.system(input());
+    expect(system).toContain('Current phase: 2 of 6 — Users');
+    expect(system).toContain(phases[1].goal);
+    expect(system).toContain(phases[1].questions[0]);
+    expect(system).toContain(phases[1].exitCheck);
+    expect(system).not.toContain(phases[0].goal);
+  });
+
+  it('summarises earlier phases from the participants’ own words', () => {
+    const system = CoachPrompt.system(
+      input({
+        phase: 3,
+        history: [
+          userMsg('Hostel food is thrown away nightly', 1),
+          userMsg('Mess managers, we talked to 4', 2, 'Asha'),
+          userMsg('current', 3),
+        ],
+      }),
+    );
+    expect(system).toContain('Phase 1 (Problem):');
+    expect(system).toContain('Ben: Hostel food is thrown away nightly');
+    expect(system).toContain('Asha: Mess managers, we talked to 4');
+    expect(system).not.toContain('Ben: current');
+  });
+
+  it('lists evidence with [n] citations or says no sources were found', () => {
+    const sources = [
+      { title: 'Paper A', url: 'https://doi.org/a', meta: '2020 · Nature', snippet: 'Abstract' },
+    ];
+    const withSources = CoachPrompt.system(
+      input({ brief: { specialist: 'research', sources, verified: true } }),
+    );
+    expect(withSources).toContain('[1] Paper A (2020 · Nature) https://doi.org/a');
+    expect(withSources).toContain('cite as [n]');
+    expect(
+      CoachPrompt.system(input({ brief: { specialist: 'research', sources: [], verified: true } })),
+    ).toContain('no sources found');
+    expect(
+      CoachPrompt.system(input({ brief: { specialist: 'market', sources: [], verified: false } })),
+    ).toMatch(/label them clearly as unverified/);
+    expect(
+      CoachPrompt.system(input({ brief: { specialist: 'devil', sources: [], verified: true } })),
+    ).toContain("Devil's Advocate");
+    expect(
+      CoachPrompt.system(input({ brief: { specialist: 'users', sources: [], verified: true } })),
+    ).toContain('User Voice');
+  });
+
+  it('adds phase move, off-topic and deck instructions', () => {
+    expect(
+      CoachPrompt.system(input({ phase: 3, move: { from: 2, to: 3, reason: 'Users are clear' } })),
+    ).toContain('just completed phase 2');
+    expect(
+      CoachPrompt.system(input({ phase: 1, move: { from: 3, to: 1, reason: 'Problem changed' } })),
+    ).toContain('back to phase 1 (Problem) because: Problem changed');
+    expect(CoachPrompt.system(input({ offTopic: true }))).toContain('short, polite redirect');
+    expect(CoachPrompt.system(input({ phase: 6, deckReview: true }))).toContain('slide by slide');
+  });
+
+  it('caps history at 30 chat messages and prefixes authors only in team threads', () => {
+    const history = Array.from({ length: 45 }, (_, i) =>
+      i % 2
+        ? {
+            kind: 'assistant',
+            role: 'assistant',
+            content: `m${i}`,
+            authorName: 'AI Coach',
+            phase: 1,
+          }
+        : userMsg(`m${i}`, 1),
+    );
+    const messages = CoachPrompt.build(
+      input({
+        history: [
+          ...history,
+          { kind: 'card', role: 'system', content: 'card', authorName: null, phase: 1 },
+        ],
+      }),
+    );
     expect(messages).toHaveLength(1 + 30 + 1);
     expect(messages[1]).toEqual({ role: 'assistant', content: 'm15' });
     expect(messages[2]).toEqual({ role: 'user', content: 'Ben: m16' });
-    expect(messages[30].content).toBe('Ben: m44');
     expect(messages[31]).toEqual({ role: 'user', content: 'Asha: Here is our user persona' });
-  });
-
-  it('prefixes user turns with author names only in team threads', () => {
-    const history = [
-      { role: 'user' as const, content: 'Idea A', authorName: 'Ben' },
-      { role: 'assistant' as const, content: 'Why A?', authorName: 'AI Helper' },
-    ];
-    const team = service.buildMessages(input({ history }));
-    expect(team.slice(1).map((m) => m.content)).toEqual([
-      'Ben: Idea A',
-      'Why A?',
-      'Asha: Here is our user persona',
-    ]);
-    const personal = service.buildMessages(input({ history, scope: 'personal' }));
-    expect(personal.slice(1).map((m) => m.content)).toEqual([
-      'Idea A',
-      'Why A?',
-      'Here is our user persona',
-    ]);
+    const personal = CoachPrompt.build(
+      input({ scope: 'personal', history: [userMsg('Idea A', 1)] }),
+    );
+    expect(personal.slice(1).map((m) => m.content)).toEqual(['Idea A', 'Here is our user persona']);
     expect(personal[0].content).toContain('personal thread');
   });
 });
 
-describe('AsiOneClient.stream', () => {
-  const config = (values: Record<string, string>) => ({ get: (key: string) => values[key] }) as any;
-  const sse = (chunks: string[]) =>
-    new ReadableStream<Uint8Array>({
-      start(controller) {
-        for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
-        controller.close();
-      },
+describe('IdeationService', () => {
+  let prisma: PrismaService;
+  let guard: IdeationGuard;
+  let routerDecide: jest.Mock;
+  let scoutSearch: jest.Mock;
+  let marketSearch: jest.Mock;
+  let streamed: string[][];
+  let service: IdeationService;
+  let events: Array<[string, any]>;
+  const emit = (event: string, data: unknown) => events.push([event, data]);
+  const context: IdeationContext = {
+    userId: 'u1',
+    userName: 'Asha',
+    hackathon: { id: 'h1', title: 'Campus Ideathon' },
+    config: defaultIdeationConfig(),
+    team,
+  };
+  const verdict = (overrides: object) => ({ ...IdeationRouter.fallback(), ...overrides });
+  const flow = () => events.map(([event, data]) => (event === 'stage' ? data.name : event));
+  const thread = (scope: 'team' | 'personal' = 'team') =>
+    (service as any).loadThread(service.threadId(context, scope));
+  const startAt = (phase: number) =>
+    prisma.aiConversation.create({
+      data: { id: service.threadId(context, 'team'), phase, phaseHistory: [] },
     });
 
-  afterEach(() => jest.restoreAllMocks());
-
-  async function collect(client: AsiOneClient) {
-    const out: string[] = [];
-    for await (const delta of client.stream([{ role: 'user', content: 'hi' }])) out.push(delta);
-    return out;
-  }
-
-  it('streams a not-configured notice without calling the provider', async () => {
-    const fetchSpy = jest.spyOn(globalThis, 'fetch');
-    expect(await collect(new AsiOneClient(config({})))).toEqual([AI_HELPER_NOT_CONFIGURED]);
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  it('parses split SSE deltas, ignores thought events, stops at [DONE] and retries one 429', async () => {
-    const fetchSpy = jest
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response('busy', { status: 429 }))
-      .mockResolvedValueOnce(
-        new Response(
-          sse([
-            'data: {"thought":"thinking"}\n\ndata: {"choices":[{"delta":{"content":"Hel"}}]}\n',
-            '\ndata: {"choices":[{"delta":{"con',
-            'tent":"lo"}}]}\n\ndata: [DONE]\n\ndata: {"choices":[{"delta":{"content":"ignored"}}]}\n\n',
-          ]),
-          { status: 200 },
-        ),
-      );
-    const client = new AsiOneClient(
-      config({ AI_API_KEY: 'k', AI_BASE_URL: 'https://api.example/v1/' }),
+  beforeEach(() => {
+    prisma = new PrismaService();
+    guard = new IdeationGuard();
+    routerDecide = jest.fn().mockResolvedValue(IdeationRouter.fallback());
+    scoutSearch = jest
+      .fn()
+      .mockResolvedValue([
+        { title: 'Paper', url: 'https://doi.org/p', meta: '2020', snippet: 's' },
+      ]);
+    marketSearch = jest.fn().mockResolvedValue({ sources: [], verified: false });
+    streamed = [];
+    const asi = {
+      configured: true,
+      async *stream(messages: any[]) {
+        streamed.push(messages.map((m) => m.content));
+        yield 'Who ';
+        yield 'exactly?';
+      },
+    };
+    service = new IdeationService(
+      prisma,
+      asi as any,
+      { decide: routerDecide } as any,
+      { search: scoutSearch } as any,
+      { search: marketSearch } as any,
+      guard,
     );
-    expect(await collect(client)).toEqual(['Hel', 'lo']);
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(fetchSpy.mock.calls[0][0]).toBe('https://api.example/v1/chat/completions');
+    events = [];
   });
 
-  it('caps the wait queue and times out queued requests instead of waiting forever', async () => {
-    let releaseFirst: () => void = () => undefined;
-    jest.spyOn(globalThis, 'fetch').mockImplementation(
-      () =>
-        new Promise<Response>((resolve) => {
-          releaseFirst = () => resolve(new Response(sse(['data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n']), { status: 200 }));
+  it('stores user and assistant messages with kinds and streams stage/delta events', async () => {
+    const result = await service.send(context, 'team', 'Students waste food', emit);
+    expect(flow()).toEqual(['routing', 'writing', 'delta', 'delta']);
+    const view = await thread();
+    expect(view.phase).toBe(1);
+    expect(view.phaseHistory).toEqual([{ phase: 1, at: expect.any(Date), reason: 'Started' }]);
+    expect(view.messages.map((m: any) => [m.kind, m.role, m.content, m.phase])).toEqual([
+      ['user', 'user', 'Students waste food', 1],
+      ['assistant', 'assistant', 'Who exactly?', 1],
+    ]);
+    expect(view.messages[0]).toMatchObject({ authorId: 'u1', authorName: 'Asha' });
+    expect(result).toEqual({
+      userMessageId: view.messages[0].id,
+      assistantMessageId: view.messages[1].id,
+      phase: 1,
+    });
+  });
+
+  it('runs the research specialist, stores a card and cites it to the master', async () => {
+    routerDecide.mockResolvedValue(verdict({ specialist: 'research', query: 'hostel food waste' }));
+    await service.send(context, 'team', 'Is this studied?', emit);
+    expect(scoutSearch).toHaveBeenCalledWith('hostel food waste', undefined);
+    expect(flow()).toEqual(['routing', 'research', 'card', 'writing', 'delta', 'delta']);
+    expect(events[2][1]).toEqual({
+      id: expect.any(String),
+      specialist: 'research',
+      title: 'Research Scout',
+      sources: [{ title: 'Paper', url: 'https://doi.org/p', meta: '2020' }],
+    });
+    expect(streamed[0][0]).toContain('[1] Paper (2020) https://doi.org/p');
+    expect((await thread()).messages.map((m: any) => m.kind)).toEqual([
+      'user',
+      'card',
+      'assistant',
+    ]);
+  });
+
+  it('labels an unavailable market search as unverified and keys caps by team', async () => {
+    routerDecide.mockResolvedValue(verdict({ specialist: 'market' }));
+    await service.send(context, 'team', 'Who are our competitors?', emit);
+    expect(marketSearch).toHaveBeenCalledWith('Who are our competitors?', 'team:t1', undefined);
+    expect(events.find(([e]) => e === 'card')![1].title).toMatch(/unverified/);
+    expect(streamed[0][0]).toMatch(/label them clearly as unverified/);
+    await service.send(context, 'personal', 'Competitors again?', emit);
+    expect(marketSearch).toHaveBeenLastCalledWith('Competitors again?', 'user:u1', undefined);
+  });
+
+  it('advances one phase, records history and tells the master', async () => {
+    routerDecide.mockResolvedValue(verdict({ verdict: 'advance', reason: 'Problem is sharp' }));
+    const result = await service.send(context, 'team', 'Our problem is X', emit);
+    expect(result.phase).toBe(2);
+    expect(flow()).toEqual(['routing', 'phase', 'writing', 'delta', 'delta']);
+    expect(events.find(([e]) => e === 'phase')![1]).toEqual({
+      from: 1,
+      to: 2,
+      reason: 'Problem is sharp',
+    });
+    const view = await thread();
+    expect(view.phase).toBe(2);
+    expect(view.phaseHistory.map((h: any) => [h.phase, h.reason])).toEqual([
+      [1, 'Started'],
+      [2, 'Problem is sharp'],
+    ]);
+    expect(view.messages.map((m: any) => [m.kind, m.phase])).toEqual([
+      ['user', 1],
+      ['phase', 2],
+      ['assistant', 2],
+    ]);
+    expect(view.messages[1].phaseChange).toEqual({ from: 1, to: 2, reason: 'Problem is sharp' });
+    expect(streamed[0][0]).toContain('Current phase: 2 of 6');
+    expect((await thread('personal')).phase).toBe(1);
+  });
+
+  it('revisits an earlier phase and clamps advance at phase 6', async () => {
+    await startAt(4);
+    routerDecide.mockResolvedValue(
+      verdict({ verdict: 'revisit', revisitTo: 2, reason: 'New user group' }),
+    );
+    expect(
+      (await service.send(context, 'team', 'Actually our users are teachers', emit)).phase,
+    ).toBe(2);
+    expect(events.find(([e]) => e === 'phase')![1]).toEqual({
+      from: 4,
+      to: 2,
+      reason: 'New user group',
+    });
+    await prisma.aiConversation.update({
+      where: { id: service.threadId(context, 'team') },
+      data: { phase: 6 },
+    });
+    routerDecide.mockResolvedValue(verdict({ verdict: 'advance' }));
+    events = [];
+    expect((await service.send(context, 'team', 'Done?', emit)).phase).toBe(6);
+    expect(events.some(([e]) => e === 'phase')).toBe(false);
+  });
+
+  it('counts off-topic strikes toward the cooldown', async () => {
+    routerDecide.mockResolvedValue(verdict({ offTopic: true }));
+    for (const text of ['a', 'b', 'c']) await service.send(context, 'personal', text, emit);
+    expect(guard.checkSend('u1', 'h1', 'any', 'new')?.message).toMatch(/off-topic/);
+    expect(streamed[0][0]).toContain('short, polite redirect');
+  });
+
+  it('keeps the user message when the model fails', async () => {
+    (service as any).asi = {
+      configured: true,
+      stream: () => ({
+        [Symbol.asyncIterator]: () => ({
+          next: () => Promise.reject(new AiBusyError('queue full')),
         }),
+      }),
+    };
+    await expect(service.send(context, 'team', 'hello', emit)).rejects.toBeInstanceOf(AiBusyError);
+    expect((await thread()).messages.map((m: any) => m.kind)).toEqual(['user']);
+  });
+
+  it('validates decks: size limits and phase 6 only', async () => {
+    const slide = (index: number, text = 'x') => ({ index, title: `S${index}`, text });
+    await expect(service.assertDeckAllowed(context, 'team', [slide(1)])).rejects.toBeInstanceOf(
+      ConflictException,
     );
-    const client = new AsiOneClient(
-      config({ AI_API_KEY: 'k', AI_MAX_CONCURRENCY: '1', AI_MAX_QUEUE: '1', AI_QUEUE_TIMEOUT_MS: '1000' }),
+    await startAt(6);
+    await expect(service.assertDeckAllowed(context, 'team', [slide(1)])).resolves.toBeUndefined();
+    await expect(
+      service.assertDeckAllowed(
+        context,
+        'team',
+        Array.from({ length: 61 }, (_, i) => slide(i + 1)),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.assertDeckAllowed(context, 'team', [slide(1, 'y'.repeat(24_000))]),
+    ).rejects.toThrow(/too long/);
+    await expect(service.assertDeckAllowed(context, 'personal', [slide(1)])).rejects.toThrow(
+      /phase 6/,
     );
-    const first = collect(client);
-    await new Promise((r) => setImmediate(r));
-    const queued = collect(client);
-    await new Promise((r) => setImmediate(r));
-    expect(client.queueDepth).toBe(1);
-    await expect(collect(client)).rejects.toBeInstanceOf(AiBusyError);
-    await expect(queued).rejects.toThrow('timed out');
-    expect(client.queueDepth).toBe(0);
-    releaseFirst();
-    expect(await first).toEqual(['ok']);
+  });
+
+  it('reviews a deck slide by slide and stores a deck message', async () => {
+    await startAt(6);
+    const result = await service.reviewDeck(
+      context,
+      'team',
+      'pitch.pptx',
+      [
+        { index: 2, title: 'Problem', text: 'Food waste' },
+        { index: 1, title: '', text: '' },
+      ],
+      emit,
+    );
+    expect(flow()).toEqual(['reading', 'writing', 'delta', 'delta']);
+    const view = await thread();
+    expect(view.messages[0]).toMatchObject({
+      kind: 'deck',
+      role: 'user',
+      deck: { fileName: 'pitch.pptx', slideCount: 2 },
+    });
+    expect(view.messages[0].content).toBe('Slide 1:\n(no text)\n\nSlide 2:\nProblem\nFood waste');
+    expect(result).toEqual({
+      userMessageId: view.messages[0].id,
+      assistantMessageId: view.messages[1].id,
+      phase: 6,
+    });
+    expect(streamed[0][0]).toContain('slide by slide');
+    expect(routerDecide).not.toHaveBeenCalled();
+  });
+
+  it('reads legacy v1 messages without kind or phase', async () => {
+    await prisma.aiMessage.create({
+      data: {
+        conversationId: service.threadId(context, 'team'),
+        role: 'assistant',
+        content: 'old',
+        round: 3,
+      },
+    });
+    expect((await thread()).messages[0]).toMatchObject({
+      kind: 'assistant',
+      role: 'assistant',
+      phase: 3,
+    });
   });
 });

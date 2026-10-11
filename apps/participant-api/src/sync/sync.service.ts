@@ -90,7 +90,7 @@ export class SyncService {
     if (!parsed.success) throw new BadRequestException({ message: 'Invalid ideation config', details: parsed.error.issues });
     const updated = await this.prisma.hackathon.update({ where: { id: hackathonId }, data: { ideation: parsed.data } } as any);
     if (!updated) throw new NotFoundException('Hackathon not found');
-    return { hackathonId, currentRound: parsed.data.currentRound };
+    return { hackathonId, phases: parsed.data.phases.length };
   }
 
   async consumeMany(events: unknown[]) {

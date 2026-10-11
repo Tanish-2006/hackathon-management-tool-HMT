@@ -75,12 +75,12 @@ class Smoke:
             self.check(f"hackathon {step}", status in (200, 201), body)
         return hid
 
-    def set_round(self, org, hid, round_number):
+    def set_instructions(self, org, hid, marker):
         status, body = self.api.call("GET", f"/organizer/api/v1/hackathons/{hid}/ideation", token=org)
         config = self.data(body)
-        config["currentRound"] = round_number
+        config["extraInstructions"] = f"Smoke marker {marker}"
         status, body = self.api.call("PUT", f"/organizer/api/v1/hackathons/{hid}/ideation", config, org)
-        self.check(f"organizer sets round {round_number}", status == 200, body)
+        self.check(f"organizer saves phase instructions ({marker})", status == 200, body)
 
     def participant(self, name, index):
         email = f"p{index}-{self.stamp}@smoke.hmt"
@@ -113,7 +113,7 @@ class Smoke:
     def run_flow(self):
         org = self.organizer()
         hid = self.publish_ideathon(org)
-        self.set_round(org, hid, 1)
+        self.set_instructions(org, hid, "one")
         p1 = self.participant("Asha", 1)
         p2 = self.participant("Bilal", 2)
         p3 = self.participant("Chen", 3)
@@ -130,10 +130,10 @@ class Smoke:
         self.check("team detail for member", status == 200 and len(self.data(body).get("members", [])) == 2, body)
         self.stream(p1, hid, "team", "We want to help college students find affordable shared housing.")
         self.stream(p3, hid, "personal", "I have a rough idea about reducing food waste in hostels.")
-        self.set_round(org, hid, 2)
+        self.set_instructions(org, hid, "two")
         status, body = self.api.call("GET", f"/api/v1/ideation/{hid}", token=p2)
         view = self.data(body)
-        self.check("participant sees round 2", status == 200 and view.get("currentRound") == 2, body)
+        self.check("participant sees updated phase config", status == 200 and view.get("extraInstructions") == "Smoke marker two" and len(view.get("phases") or []) == 6, body)
         self.check("team thread visible to teammate", len(view.get("teamThread") or []) >= 1, view.get("teamThread"))
         with open(self.state_file, "w") as fh:
             json.dump({"hid": hid, "team": team["id"], "p2": p2, "org": org}, fh)
@@ -143,7 +143,7 @@ class Smoke:
             state = json.load(fh)
         status, body = self.api.call("GET", f"/api/v1/ideation/{state['hid']}", token=state["p2"])
         view = self.data(body)
-        self.check("after restart: round persisted", status == 200 and view.get("currentRound") == 2, body)
+        self.check("after restart: phase config persisted", status == 200 and view.get("extraInstructions") == "Smoke marker two", body)
         self.check("after restart: team thread persisted", len(view.get("teamThread") or []) >= 1, body)
         status, body = self.api.call("GET", f"/api/v1/team/{state['team']}", token=state["p2"])
         self.check("after restart: team persisted", status == 200 and len(self.data(body).get("members", [])) == 2, body)

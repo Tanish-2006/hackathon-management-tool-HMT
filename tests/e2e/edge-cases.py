@@ -156,20 +156,38 @@ class Clock:
 
 class Ideation:
     @staticmethod
-    def config(current_round=1, rounds=5, questions=2, title=None):
+    def config(phases=6, questions=2, title=None, extra="Be brief."):
         return {
-            "currentRound": current_round,
-            "rounds": [
+            "phases": [
                 {
-                    "title": title if title is not None else f"Round {index + 1}",
-                    "goal": f"Goal for round {index + 1}",
+                    "id": index + 1,
+                    "title": title if title is not None else f"Phase {index + 1}",
+                    "goal": f"Goal for phase {index + 1}",
                     "questions": [f"Question {q + 1}?" for q in range(questions)],
-                    "exitCriteria": f"Exit criteria {index + 1}",
+                    "exitCheck": f"Exit check {index + 1}",
                 }
-                for index in range(rounds)
+                for index in range(phases)
             ],
-            "extraInstructions": "Be brief.",
+            "extraInstructions": extra,
         }
+
+    @staticmethod
+    def with_phase(config, index, **changes):
+        config["phases"][index] = {**config["phases"][index], **changes}
+        return config
+
+    @staticmethod
+    def thread_ok(thread):
+        return isinstance(thread, dict) and thread.get("phase") in range(1, 7) and isinstance(thread.get("phaseHistory"), list) and isinstance(thread.get("messages"), list)
+
+    @staticmethod
+    def answered(messages, index):
+        for message in messages[index + 1:]:
+            if message["kind"] in ("user", "deck"):
+                return False
+            if message["kind"] == "assistant":
+                return True
+        return False
 
 
 class Participant:
@@ -579,12 +597,12 @@ class EdgeCaseSuite:
     def put_ideation(self, token, hackathon_id, config):
         return self.o.call("PUT", f"/hackathons/{hackathon_id}/ideation", config, token=token)
 
-    def wait_round(self, user, hackathon_id, expected, seconds=8):
+    def wait_phase_title(self, user, hackathon_id, expected, seconds=8):
         deadline = time.time() + seconds
         state = None
         while time.time() < deadline:
             state = self.p.call("GET", f"/ideation/{hackathon_id}", token=user.token)
-            if state.status == 200 and state.field("currentRound") == expected:
+            if state.status == 200 and state.field("phases", 1, "title") == expected:
                 return state
             time.sleep(0.4)
         return state
@@ -595,8 +613,9 @@ class EdgeCaseSuite:
         r.expect("ideation: unregistered GET 403", self.p.call("GET", f"/ideation/{self.h1}", token=outsider.token), 403)
         r.expect("ideation: no token 401", self.p.call("GET", f"/ideation/{self.h1}"), 401)
         state = self.p.call("GET", f"/ideation/{self.h1}", token=self.loner.token)
-        r.expect("ideation: registered without team -> team thread null, personal list", state, 200, lambda x: x.field("teamThread") is None and isinstance(x.field("personalThread"), list))
-        r.expect("ideation: team member sees team", self.p.call("GET", f"/ideation/{self.h1}", token=self.leader.token), 200, lambda x: x.field("team", "id") == self.team_a["id"] and isinstance(x.field("teamThread"), list))
+        r.expect("ideation: registered without team -> team thread null, personal thread", state, 200, lambda x: x.field("teamThread") is None and Ideation.thread_ok(x.field("personalThread")))
+        r.expect("ideation: state has 6 phases and limits", state, 200, lambda x: [p["id"] for p in x.field("phases")] == [1, 2, 3, 4, 5, 6] and x.field("limits", "maxChars") == 4000 and "currentRound" not in x.body and isinstance(x.field("extraInstructions"), str))
+        r.expect("ideation: team member sees team", self.p.call("GET", f"/ideation/{self.h1}", token=self.leader.token), 200, lambda x: x.field("team", "id") == self.team_a["id"] and Ideation.thread_ok(x.field("teamThread")))
         path = f"/ideation/{self.h1}/messages"
         r.expect("ideation: team scope without team 403", self.p.call("POST", path, {"scope": "team", "content": "hi"}, token=self.loner.token), 403)
         r.expect("ideation: empty content 400", self.p.call("POST", path, {"scope": "personal", "content": ""}, token=self.leader.token), 400)
@@ -609,81 +628,94 @@ class EdgeCaseSuite:
         r.expect("ideation: unregistered POST 403", self.p.call("POST", path, {"scope": "personal", "content": "hi"}, token=outsider.token), 403)
         r.expect("ideation: non-existent hackathon GET 404", self.p.call("GET", "/ideation/hack_nope", token=self.leader.token), 404)
         r.expect("ideation: non-existent hackathon POST 404", self.p.call("POST", "/ideation/hack_nope/messages", {"scope": "personal", "content": "hi"}, token=self.leader.token), 404)
+        deck = f"/ideation/{self.h1}/deck"
+        slide = {"index": 1, "title": "Problem", "text": "Food waste"}
+        r.expect("ideation deck: phase 1 -> 409", self.p.call("POST", deck, {"scope": "team", "fileName": "pitch.pptx", "slides": [slide]}, token=self.leader.token), 409, lambda x: "phase 6" in str(x.field("message")))
+        r.expect("ideation deck: 61 slides 400", self.p.call("POST", deck, {"scope": "team", "fileName": "pitch.pptx", "slides": [{**slide, "index": i + 1} for i in range(61)]}, token=self.leader.token), 400)
+        r.expect("ideation deck: no slides 400", self.p.call("POST", deck, {"scope": "team", "fileName": "pitch.pptx", "slides": []}, token=self.leader.token), 400)
+        r.expect("ideation deck: missing fileName 400", self.p.call("POST", deck, {"scope": "team", "slides": [slide]}, token=self.leader.token), 400)
+        r.expect("ideation deck: unknown slide field 400", self.p.call("POST", deck, {"scope": "team", "fileName": "a.pdf", "slides": [{**slide, "image": "x"}]}, token=self.leader.token), 400)
+        r.expect("ideation deck: over 24k chars 400", self.p.call("POST", deck, {"scope": "team", "fileName": "a.pdf", "slides": [{**slide, "index": i + 1, "text": "x" * 5000} for i in range(5)]}, token=self.leader.token), 400)
+        r.expect("ideation deck: team scope without team 403", self.p.call("POST", deck, {"scope": "team", "fileName": "a.pdf", "slides": [slide]}, token=self.loner.token), 403)
         bad = {
-            "currentRound 0": Ideation.config(0),
-            "currentRound 6": Ideation.config(6),
-            "currentRound 2.5": Ideation.config(2.5),
-            "currentRound string": {**Ideation.config(), "currentRound": "2"},
-            "missing rounds": {"currentRound": 1},
-            "4 rounds": Ideation.config(1, rounds=4),
-            "6 rounds": Ideation.config(1, rounds=6),
-            "questions > 12": Ideation.config(1, questions=13),
-            "zero questions": Ideation.config(1, questions=0),
-            "title > 120": Ideation.config(1, title="T" * 121),
-            "blank title": Ideation.config(1, title="   "),
-            "extraInstructions > 4000": {**Ideation.config(), "extraInstructions": "x" * 4001},
+            "legacy currentRound": {**Ideation.config(), "currentRound": 2},
+            "legacy rounds shape": {"currentRound": 1, "rounds": Ideation.config()["phases"]},
+            "missing phases": {"extraInstructions": "x"},
+            "5 phases": Ideation.config(5),
+            "7 phases": Ideation.config(7),
+            "phase ids out of order": Ideation.with_phase(Ideation.config(), 0, id=2),
+            "questions > 12": Ideation.config(questions=13),
+            "zero questions": Ideation.config(questions=0),
+            "title > 120": Ideation.config(title="T" * 121),
+            "blank title": Ideation.config(title="   "),
+            "exitCheck > 1500": Ideation.with_phase(Ideation.config(), 3, exitCheck="x" * 1501),
+            "missing exitCheck": {"phases": [{k: v for k, v in p.items() if k != "exitCheck"} for p in Ideation.config()["phases"]]},
+            "extraInstructions > 4000": Ideation.config(extra="x" * 4001),
         }
         for label, config in bad.items():
             r.expect(f"organizer ideation: {label} 400", self.put_ideation(self.org, self.h1, config), 400)
-        r.expect("organizer ideation: malformed JSON 400", self.o.call("PUT", f"/hackathons/{self.h1}/ideation", raw=b'{"currentRound":', token=self.org), 400)
-        r.expect("organizer ideation: non-owner 403", self.put_ideation(self.org_other, self.h1, Ideation.config(2)), 403)
+        r.expect("organizer ideation: malformed JSON 400", self.o.call("PUT", f"/hackathons/{self.h1}/ideation", raw=b'{"phases":', token=self.org), 400)
+        r.expect("organizer ideation: non-owner 403", self.put_ideation(self.org_other, self.h1, Ideation.config()), 403)
         r.expect("organizer ideation: non-owner GET 403", self.o.call("GET", f"/hackathons/{self.h1}/ideation", token=self.org_other), 403)
-        r.expect("organizer ideation: participant token 401/403", self.put_ideation(self.leader.token, self.h1, Ideation.config(2)), (401, 403))
-        r.expect("organizer ideation: no token 401", self.put_ideation(None, self.h1, Ideation.config(2)), 401)
-        r.expect("organizer ideation: unknown hackathon 404", self.put_ideation(self.org, "nope", Ideation.config(2)), 404)
-        r.expect("organizer ideation: set round 2", self.put_ideation(self.org, self.h1, Ideation.config(2)), 200, lambda x: x.field("data", "currentRound") == 2)
-        r.expect("organizer ideation: GET reflects round 2", self.o.call("GET", f"/hackathons/{self.h1}/ideation", token=self.org), 200, lambda x: x.field("data", "currentRound") == 2)
-        r.expect("ideation: participant sees round 2 after advance", self.wait_round(self.leader, self.h1, 2), 200, lambda x: x.field("currentRound") == 2 and x.field("ideation", "rounds", 1, "title") == "Round 2")
+        r.expect("organizer ideation: participant token 401/403", self.put_ideation(self.leader.token, self.h1, Ideation.config()), (401, 403))
+        r.expect("organizer ideation: no token 401", self.put_ideation(None, self.h1, Ideation.config()), 401)
+        r.expect("organizer ideation: unknown hackathon 404", self.put_ideation(self.org, "nope", Ideation.config()), 404)
+        r.expect("organizer ideation: default GET has 6 phases", self.o.call("GET", f"/hackathons/{self.h1}/ideation", token=self.org), 200, lambda x: len(x.field("data", "phases")) == 6)
+        r.expect("organizer ideation: save phases", self.put_ideation(self.org, self.h1, Ideation.config()), 200, lambda x: x.field("data", "phases", 1, "title") == "Phase 2" and "currentRound" not in x.field("data"))
+        r.expect("organizer ideation: GET reflects saved phases", self.o.call("GET", f"/hackathons/{self.h1}/ideation", token=self.org), 200, lambda x: x.field("data", "phases", 1, "title") == "Phase 2" and x.field("data", "extraInstructions") == "Be brief.")
+        r.expect("ideation: participant sees organizer phases after sync", self.wait_phase_title(self.leader, self.h1, "Phase 2"), 200, lambda x: x.field("phases", 5, "exitCheck") == "Exit check 6" and x.field("extraInstructions") == "Be brief.")
         sync = f"/sync/ideation/{self.h1}"
-        r.expect("sync ideation: no secret 401", self.p.call("PUT", sync, Ideation.config(4)), (401, 403))
-        r.expect("sync ideation: wrong secret 401", self.p.call("PUT", sync, Ideation.config(4), headers={"x-sync-secret": "wrong"}), (401, 403))
-        r.expect("sync ideation: participant JWT rejected", self.p.call("PUT", sync, Ideation.config(4), token=self.leader.token), (401, 403))
-        r.expect("sync ideation: foreign organizer JWT rejected", self.p.call("PUT", sync, Ideation.config(4), token=self.org_other), (401, 403))
+        forged = Ideation.config(title="Forged")
+        r.expect("sync ideation: no secret 401", self.p.call("PUT", sync, forged), (401, 403))
+        r.expect("sync ideation: wrong secret 401", self.p.call("PUT", sync, forged, headers={"x-sync-secret": "wrong"}), (401, 403))
+        r.expect("sync ideation: participant JWT rejected", self.p.call("PUT", sync, forged, token=self.leader.token), (401, 403))
+        r.expect("sync ideation: foreign organizer JWT rejected", self.p.call("PUT", sync, forged, token=self.org_other), (401, 403))
         r.expect("sync consume: foreign organizer JWT cannot forge events", self.p.call("POST", "/sync/consume", {"type": "HackathonArchived", "eventId": "00000000-0000-4000-8000-000000000000", "version": "v1", "occurredAt": Clock.iso(timedelta()), "actorId": None, "payload": {"hackathonId": self.h1, "archivedAt": Clock.iso(timedelta())}}, token=self.org_other), (401, 403))
-        r.expect("ideation: round unchanged by rejected sync calls", self.p.call("GET", f"/ideation/{self.h1}", token=self.leader.token), 200, lambda x: x.field("currentRound") == 2)
+        r.expect("ideation: phases unchanged by rejected sync calls", self.p.call("GET", f"/ideation/{self.h1}", token=self.leader.token), 200, lambda x: x.field("phases", 1, "title") == "Phase 2")
         if self.sync_secret:
             secret = {"x-sync-secret": self.sync_secret}
-            r.expect("sync ideation: valid secret, invalid body 400", self.p.call("PUT", sync, {"currentRound": 9}, headers=secret), 400)
-            r.expect("sync ideation: valid secret, unknown hackathon 404", self.p.call("PUT", "/sync/ideation/hack_nope", Ideation.config(2), headers=secret), 404)
+            r.expect("sync ideation: valid secret, legacy body 400", self.p.call("PUT", sync, {"currentRound": 2, "rounds": []}, headers=secret), 400)
+            r.expect("sync ideation: valid secret, unknown hackathon 404", self.p.call("PUT", "/sync/ideation/hack_nope", Ideation.config(), headers=secret), 404)
             r.expect("sync consume: invalid event 400", self.p.call("POST", "/sync/consume", {"type": "HackathonPublished"}, headers=secret), 400)
             r.expect("sync consume: unknown type 400", self.p.call("POST", "/sync/consume", {"type": "Nope"}, headers=secret), 400)
             r.expect("sync consume-batch: not an array 400", self.p.call("POST", "/sync/consume-batch", {"events": "x"}, headers=secret), 400)
         if not self.ai:
             r.skip("ideation: AI streaming cases", "--no-ai")
-            r.expect("organizer ideation: set round 3", self.put_ideation(self.org, self.h1, Ideation.config(3)), 200)
-            r.expect("ideation: participant sees round 3", self.wait_round(self.leader, self.h1, 3), 200)
             return
         response, events = self.stream_message(self.leader, self.h1, "personal", "a" * 4000)
         names = [e for e, _ in events]
         r.check("ideation: exactly 4000 chars streams start..done", response.status == 200 and names[:1] == ["start"] and names[-1:] == ["done"], f"status={response.status} events={names[:3]}..{names[-2:]}")
-        contents = [f"concurrent-{self.run}-{i}" for i in range(5)]
-        started = threading.Semaphore(0)
-        results = [None] * 5
-        authors = [self.leader, self.mate, self.leader, self.mate, self.leader]
+        r.check("ideation: start carries phase, stages include routing and writing", bool(events) and events[0][1].get("phase") == 1 and {"routing", "writing"} <= {p.get("name") for e, p in events if e == "stage"}, f"events={names}")
+        time.sleep(3.2)
+        contents = [f"concurrent-{self.run}-{i}" for i in range(3)]
+        authors = [self.leader, self.mate, self.leader]
+        results = [None] * 3
 
         def send(index):
-            results[index] = self.stream_message(authors[index], self.h1, "team", contents[index], lambda e, _p: started.release() if e == "start" else None)
+            results[index] = self.stream_message(authors[index], self.h1, "team", contents[index])
 
-        threads = [threading.Thread(target=send, args=(i,)) for i in range(5)]
+        threads = [threading.Thread(target=send, args=(i,)) for i in range(3)]
         for thread in threads:
             thread.start()
-        for _ in range(5):
-            started.acquire(timeout=60)
-        advanced = self.put_ideation(self.org, self.h1, Ideation.config(3))
         for thread in threads:
             thread.join()
-        r.expect("ideation: round advanced while streams in flight", advanced, 200)
-        done = [next((p for e, p in evs if e == "done"), None) for _, evs in results]
-        r.check("ideation: 5 concurrent team sends all complete", all(d is not None for d in done), f"events={[[e for e, _ in evs] for _, evs in results]}")
-        r.check("ideation: in-flight messages tagged with round at send time (2)", all(d and d["round"] == 2 for d in done), f"rounds={[d and d['round'] for d in done]}")
-        thread_state = self.wait_round(self.leader, self.h1, 3)
-        r.expect("ideation: participant sees round 3 after advance", thread_state, 200)
-        team_thread = thread_state.field("teamThread") or []
-        mine = [i for i, m in enumerate(team_thread) if m["role"] == "user" and m["content"] in contents]
-        r.check("ideation: all 5 team messages persisted once", sorted(team_thread[i]["content"] for i in mine) == sorted(contents), f"found={[team_thread[i]['content'] for i in mine]}")
-        r.check("ideation: no interleaving (each user turn followed by its assistant reply)", all(i + 1 < len(team_thread) and team_thread[i + 1]["role"] == "assistant" for i in mine), f"roles={[m['role'] for m in team_thread]}")
-        r.check("ideation: persisted messages carry round 2 and author", all(team_thread[i]["round"] == 2 and team_thread[i]["authorId"] in (self.leader.id, self.mate.id) for i in mine), "")
-        r.check("ideation: mate sees same team thread", len([m for m in (self.p.call("GET", f"/ideation/{self.h1}", token=self.mate.token).field("teamThread") or []) if m["content"] in contents]) == 5)
+        statuses = sorted(res.status for res, _ in results)
+        r.check("ideation: concurrent team sends -> two stream, leader's second is rate limited", statuses == [200, 200, 429], f"statuses={statuses}")
+        limited = next((res for res, _ in results if res.status == 429), None)
+        r.check("ideation: 429 body has retryAfter and message", limited is not None and isinstance(limited.body, dict) and 1 <= limited.body.get("retryAfter", 0) <= 3 and bool(limited.body.get("message")), f"body={limited and limited.text}")
+        streamed = [(contents[i], evs) for i, (res, evs) in enumerate(results) if res.status == 200]
+        done = [next((p for e, p in evs if e == "done"), None) for _, evs in streamed]
+        r.check("ideation: streamed team sends complete with done{userMessageId, assistantMessageId, phase}", all(d and d.get("userMessageId") and "assistantMessageId" in d and d.get("phase") in range(1, 7) for d in done), f"done={done}")
+        thread_state = self.p.call("GET", f"/ideation/{self.h1}", token=self.leader.token)
+        team_thread = (thread_state.field("teamThread") or {}).get("messages") or []
+        sent = [content for content, _ in streamed]
+        mine = [i for i, m in enumerate(team_thread) if m["kind"] == "user" and m["content"] in sent]
+        r.check("ideation: streamed team messages persisted once", sorted(team_thread[i]["content"] for i in mine) == sorted(sent), f"found={[team_thread[i]['content'] for i in mine]}")
+        r.check("ideation: no interleaving (each user turn answered before the next)", all(Ideation.answered(team_thread, i) for i in mine), f"kinds={[m['kind'] for m in team_thread]}")
+        r.check("ideation: persisted messages carry phase and author", all(team_thread[i]["phase"] in range(1, 7) and team_thread[i]["authorId"] in (self.leader.id, self.mate.id) for i in mine), "")
+        mate_state = self.p.call("GET", f"/ideation/{self.h1}", token=self.mate.token)
+        r.check("ideation: mate sees same team thread", len([m for m in ((mate_state.field("teamThread") or {}).get("messages") or []) if m["content"] in sent]) == len(sent))
+        r.check("ideation: personal thread stays private", not [m for m in ((mate_state.field("personalThread") or {}).get("messages") or []) if m["content"] == "a" * 4000])
 
     def closure_and_archive_cases(self):
         r = self.report

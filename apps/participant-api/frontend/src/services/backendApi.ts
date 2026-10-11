@@ -332,32 +332,56 @@ export const hmtBackendService = {
 };
 
 export type IdeationScope = 'team' | 'personal';
-export type IdeationRound = { title: string; goal: string; questions: string[]; exitCriteria: string };
-export type IdeationConfig = { currentRound: number; rounds: IdeationRound[]; extraInstructions?: string };
-export type IdeationMessage = { id: string; role: 'user' | 'assistant'; content: string; round: number; authorId: string | null; authorName: string | null; createdAt: string };
+export type IdeationPhase = { title: string; goal: string; questions: string[]; exitCheck: string };
+export type IdeationSpecialist = 'research' | 'market' | 'devil' | 'users';
+export type IdeationSource = { title: string; url: string; meta: string };
+export type IdeationCard = { specialist: IdeationSpecialist; title: string; sources: IdeationSource[] };
+export type IdeationPhaseChange = { from: number; to: number; reason: string };
+export type IdeationDeckInfo = { fileName: string; slideCount: number };
+export type IdeationMessageKind = 'user' | 'assistant' | 'card' | 'phase' | 'deck' | 'notice';
+export type IdeationMessage = {
+  id: string;
+  kind: IdeationMessageKind;
+  role: string;
+  content: string;
+  authorId: string | null;
+  authorName: string | null;
+  phase: number;
+  createdAt: string;
+  card?: IdeationCard;
+  phaseChange?: IdeationPhaseChange;
+  deck?: IdeationDeckInfo;
+};
+export type IdeationThread = { id: string; phase: number; phaseHistory: Array<{ phase: number; at: string; reason: string }>; messages: IdeationMessage[] };
 export type IdeationTeam = { id: string; name: string; members: Array<{ id: string; name: string }> };
 export type IdeationState = {
   hackathon: { id: string; title: string };
-  ideation: IdeationConfig;
-  currentRound: number;
-  configured: boolean;
+  phases: IdeationPhase[];
+  extraInstructions?: string;
   team: IdeationTeam | null;
-  teamThread: IdeationMessage[] | null;
-  personalThread: IdeationMessage[];
+  teamThread: IdeationThread | null;
+  personalThread: IdeationThread;
+  limits: { maxChars: number };
 };
+export type IdeationStage = 'routing' | 'research' | 'market' | 'devil' | 'users' | 'writing' | 'reading';
+export type IdeationDeckSlide = { index: number; title: string; text: string };
 export type IdeationStreamEvent =
-  | { event: 'start'; data: { round: number; scope: IdeationScope } }
+  | { event: 'start'; data: { phase: number } }
+  | { event: 'stage'; data: { name: IdeationStage } }
+  | { event: 'card'; data: IdeationCard }
+  | { event: 'phase'; data: IdeationPhaseChange }
   | { event: 'delta'; data: { text: string } }
-  | { event: 'done'; data: { userMessageId: string; assistantMessageId: string | null; round: number } }
-  | { event: 'error'; data: { message: string } };
+  | { event: 'done'; data: { userMessageId: string; assistantMessageId: string | null; phase: number } }
+  | { event: 'error'; data: { message: string; retryAfter?: number } };
 
-export async function streamIdeationMessage(
-  hackathonId: string,
-  body: { scope: IdeationScope; content: string },
-  onEvent: (event: IdeationStreamEvent) => void,
-  signal?: AbortSignal,
-): Promise<void> {
-  const response = await participantClient.send(`/ideation/${encodeURIComponent(hackathonId)}/messages`, {
+export function retryAfterSeconds(error: unknown): number | null {
+  if (!(error instanceof ApiError) || error.status !== 429) return null;
+  const seconds = Math.ceil(Number((error.details as { retryAfter?: unknown } | undefined)?.retryAfter));
+  return seconds > 0 ? seconds : 1;
+}
+
+async function streamIdeation(path: string, body: unknown, onEvent: (event: IdeationStreamEvent) => void, signal?: AbortSignal): Promise<void> {
+  const response = await participantClient.send(path, {
     method: 'POST',
     headers: { Accept: 'text/event-stream' },
     body: JSON.stringify(body),
@@ -367,21 +391,40 @@ export async function streamIdeationMessage(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  const dispatch = (block: string) => {
+    const event = block.match(/^event: ?(.*)$/m)?.[1]?.trim();
+    const dataLines = [...block.matchAll(/^data: ?(.*)$/gm)].map((m) => m[1]);
+    if (!event || !dataLines.length) return;
+    try { onEvent({ event, data: JSON.parse(dataLines.join('\n')) } as IdeationStreamEvent); } catch {}
+  };
   for (;;) {
     const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+    buffer += decoder.decode(value, { stream: !done }).replace(/\r\n/g, '\n');
     let boundary = buffer.indexOf('\n\n');
     while (boundary !== -1) {
-      const block = buffer.slice(0, boundary);
+      dispatch(buffer.slice(0, boundary));
       buffer = buffer.slice(boundary + 2);
       boundary = buffer.indexOf('\n\n');
-      const event = block.match(/^event: ?(.*)$/m)?.[1]?.trim();
-      const data = block.match(/^data: ?(.*)$/m)?.[1];
-      if (!event || data === undefined) continue;
-      let payload: unknown;
-      try { payload = JSON.parse(data); } catch { continue; }
-      onEvent({ event, data: payload } as IdeationStreamEvent);
     }
+    if (done) break;
   }
+  if (buffer.trim()) dispatch(buffer);
+}
+
+export function streamIdeationMessage(
+  hackathonId: string,
+  body: { scope: IdeationScope; content: string },
+  onEvent: (event: IdeationStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return streamIdeation(`/ideation/${encodeURIComponent(hackathonId)}/messages`, body, onEvent, signal);
+}
+
+export function streamDeckReview(
+  hackathonId: string,
+  body: { scope: IdeationScope; fileName: string; slides: IdeationDeckSlide[] },
+  onEvent: (event: IdeationStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return streamIdeation(`/ideation/${encodeURIComponent(hackathonId)}/deck`, body, onEvent, signal);
 }

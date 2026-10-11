@@ -156,9 +156,9 @@ class LoadTest:
     async def set_round(self, number):
         status, body = await self.api.call("GET", f"/organizer/api/v1/hackathons/{self.hid}/ideation", "org.ideation.get", token=self.org)
         config = self.api.data(body)
-        config["currentRound"] = number
+        config["extraInstructions"] = f"Load test config revision {number}"
         status, body = await self.api.call("PUT", f"/organizer/api/v1/hackathons/{self.hid}/ideation", "org.ideation.put", config, self.org)
-        self.log(f"round -> {number}: {status}")
+        self.log(f"phase config revision {number}: {status}")
 
     async def onboard(self, user, delay):
         await asyncio.sleep(delay)

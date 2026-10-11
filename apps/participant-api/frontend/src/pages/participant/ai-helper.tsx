@@ -1,75 +1,56 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Link } from 'wouter';
-import { AlertCircle, Check, Loader2, Lock, Send, Sparkles, User, Users, X } from 'lucide-react';
-import { ApiError, hmtBackendService, streamIdeationMessage, type IdeationMessage, type IdeationScope, type IdeationState } from '@/services/backendApi';
+import { AlertCircle, Sparkles, User, Users, X } from 'lucide-react';
+import {
+  ApiError,
+  hmtBackendService,
+  retryAfterSeconds,
+  streamDeckReview,
+  streamIdeationMessage,
+  type IdeationDeckSlide,
+  type IdeationScope,
+  type IdeationState,
+  type IdeationStreamEvent,
+} from '@/services/backendApi';
 import { useHackathonContext } from '@/hooks/use-hackathon-context';
-import { useAuth } from '@/services/auth-context';
+import { displayNameOf, useAuth } from '@/services/auth-context';
+import { cn } from '@/lib/utils';
+import { PhaseProgress } from '@/components/ai-helper/PhaseProgress';
+import { ChatThread, type LiveTurn } from '@/components/ai-helper/ChatThread';
+import { Composer, useCountdown } from '@/components/ai-helper/Composer';
+import { DeckUpload } from '@/components/ai-helper/DeckUpload';
 
 const POLL_INTERVAL_MS = 15000;
-const MAX_LENGTH = 4000;
+const DEFAULT_MAX_CHARS = 4000;
+const DECK_PHASE = 6;
+const SCOPES: Array<{ value: IdeationScope; label: string; Icon: typeof Users }> = [
+  { value: 'team', label: 'Team', Icon: Users },
+  { value: 'personal', label: 'Personal', Icon: User },
+];
 
-type PendingTurn = { scope: IdeationScope; content: string; reply: string };
+type StreamStarter = (onEvent: (event: IdeationStreamEvent) => void, signal: AbortSignal) => Promise<void>;
 
 function friendly(e: unknown) {
   return e instanceof ApiError ? e.message : (e as Error)?.message || 'Something went wrong';
 }
 
-function RoundStepper({ state }: { state: IdeationState }) {
-  const current = state.currentRound;
-  const round = state.ideation.rounds[current - 1];
-  return (
-    <div className="space-y-3">
-      <ol className="grid gap-2 sm:grid-cols-5">
-        {state.ideation.rounds.map((r, i) => {
-          const n = i + 1;
-          const status = n < current ? 'done' : n === current ? 'current' : 'locked';
-          return (
-            <li
-              key={n}
-              aria-current={status === 'current' ? 'step' : undefined}
-              className={`rounded-xl border p-3 ${status === 'current' ? 'border-[#f26a4f] bg-white shadow-sm' : status === 'done' ? 'border-[#dedbd1] bg-[#f4f1e8]' : 'border-dashed border-[#dedbd1] bg-transparent opacity-60'}`}
-            >
-              <div className="flex items-center gap-2">
-                <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-bold ${status === 'current' ? 'bg-[#f26a4f] text-white' : status === 'done' ? 'bg-[#d8e35b] text-[#171a2d]' : 'bg-[#e9e5da] text-[#77798a]'}`}>
-                  {status === 'done' ? <Check size={13} /> : status === 'locked' ? <Lock size={11} /> : n}
-                </span>
-                <span className="font-mono text-[10px] uppercase tracking-wider text-[#77798a]">Round {n}</span>
-              </div>
-              <div className="mt-2 text-xs font-bold leading-4 text-[#171a2d]">{r.title}</div>
-            </li>
-          );
-        })}
-      </ol>
-      {round && (
-        <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5] p-4">
-          <div className="font-mono text-[10px] uppercase tracking-[.16em] text-[#f26a4f]">Now · Round {current} · {round.title}</div>
-          <p className="mt-2 text-sm leading-6 text-[#171a2d]">{round.goal}</p>
-          <details className="mt-2 text-xs text-[#55586a]">
-            <summary className="cursor-pointer font-bold text-[#171a2d]">Questions to work through and how this round ends</summary>
-            <ul className="mt-2 list-disc space-y-1 pl-5 leading-5">
-              {round.questions.map((q) => <li key={q}>{q}</li>)}
-            </ul>
-            <p className="mt-2 leading-5"><b>Exit criteria:</b> {round.exitCriteria}</p>
-          </details>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MessageBubble({ message, mine, showAuthor }: { message: Pick<IdeationMessage, 'role' | 'content' | 'round' | 'authorName'>; mine: boolean; showAuthor: boolean }) {
-  const assistant = message.role === 'assistant';
-  return (
-    <div className={`flex ${assistant || !mine ? 'justify-start' : 'justify-end'}`}>
-      <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-6 ${assistant ? 'border border-[#e5e1d7] bg-white text-[#171a2d]' : mine ? 'bg-[#171a2d] text-[#fdfbf5]' : 'bg-[#f4f1e8] text-[#171a2d]'}`}>
-        <div className={`mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider ${assistant ? 'text-[#f26a4f]' : mine ? 'text-[#d8e35b]' : 'text-[#77798a]'}`}>
-          {assistant ? <><Sparkles size={11} /> AI Helper</> : showAuthor ? message.authorName || 'Teammate' : 'You'}
-          <span className={`rounded-full px-1.5 py-0.5 font-mono text-[9px] ${mine && !assistant ? 'bg-[#252941] text-[#d8e35b]' : 'bg-[#e9e5da] text-[#77798a]'}`}>R{message.round}</span>
-        </div>
-        <div className="whitespace-pre-wrap break-words">{message.content}</div>
-      </div>
-    </div>
-  );
+function applyStreamEvent(turn: LiveTurn, event: IdeationStreamEvent): LiveTurn {
+  switch (event.event) {
+    case 'start':
+      return { ...turn, phase: event.data.phase };
+    case 'stage':
+      return { ...turn, stage: event.data.name };
+    case 'card':
+      return { ...turn, card: event.data };
+    case 'phase':
+      return { ...turn, phaseChange: event.data, phase: event.data.to };
+    case 'delta':
+      return { ...turn, reply: turn.reply + event.data.text };
+    case 'done':
+      return { ...turn, phase: event.data.phase };
+    default:
+      return turn;
+  }
 }
 
 export default function ParticipantAIHelper() {
@@ -81,22 +62,26 @@ export default function ParticipantAIHelper() {
   const [loading, setLoading] = useState(false);
   const [scope, setScope] = useState<IdeationScope | null>(null);
   const [draft, setDraft] = useState('');
-  const [pending, setPending] = useState<PendingTurn | null>(null);
-  const [sendError, setSendError] = useState<string | null>(null);
+  const [live, setLive] = useState<LiveTurn | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
+  const cooldownSeconds = useCountdown(cooldownUntil);
   const abortRef = useRef<AbortController | null>(null);
-  const listRef = useRef<HTMLDivElement | null>(null);
-  const pendingRef = useRef(false);
+  const streamingRef = useRef(false);
+  const epochRef = useRef(0);
 
   const load = useCallback(async (silent: boolean) => {
     if (!hackathonId) return;
+    const epoch = epochRef.current;
     if (!silent) setLoading(true);
     try {
       const next = await hmtBackendService.getIdeation(hackathonId);
+      if (epoch !== epochRef.current || (silent && streamingRef.current)) return;
       setState(next);
       setLoadError(null);
       setScope((prev) => prev ?? (next.team ? 'team' : 'personal'));
     } catch (e) {
-      if (!silent) {
+      if (!silent && epoch === epochRef.current) {
         setState(null);
         setLoadError(friendly(e));
       }
@@ -106,13 +91,17 @@ export default function ParticipantAIHelper() {
   }, [hackathonId]);
 
   useEffect(() => {
+    epochRef.current += 1;
+    abortRef.current?.abort();
     setState(null);
     setScope(null);
+    setLive(null);
     setLoadError(null);
+    setError(null);
     if (!hackathonId || !ctx.selectedIsRegistered) return;
     load(false);
     const timer = setInterval(() => {
-      if (!pendingRef.current && !document.hidden) load(true);
+      if (!streamingRef.current && !document.hidden) load(true);
     }, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [hackathonId, ctx.selectedIsRegistered, load]);
@@ -120,75 +109,121 @@ export default function ParticipantAIHelper() {
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const activeScope: IdeationScope = scope ?? 'personal';
-  const thread = activeScope === 'team' ? state?.teamThread ?? [] : state?.personalThread ?? [];
-  const pendingHere = pending && pending.scope === activeScope ? pending : null;
+  const thread = state ? (activeScope === 'team' ? state.teamThread : state.personalThread) : null;
+  const liveHere = live && live.scope === activeScope ? live : null;
+  const phase = liveHere?.phase ?? thread?.phase ?? 1;
+  const streaming = !!live;
+  const maxChars = state?.limits?.maxChars || DEFAULT_MAX_CHARS;
+  const userName = displayNameOf(user) || null;
 
-  useEffect(() => {
-    const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [thread.length, pendingHere?.reply, activeScope]);
-
-  async function send() {
-    const content = draft.trim();
-    if (!hackathonId || !content || pending) return;
+  async function runTurn(turn: Pick<LiveTurn, 'content' | 'deck'>, start: StreamStarter, onRejected: () => void) {
+    if (!hackathonId || streamingRef.current) return;
     const controller = new AbortController();
     abortRef.current = controller;
-    pendingRef.current = true;
-    setDraft('');
-    setSendError(null);
-    setPending({ scope: activeScope, content, reply: '' });
+    streamingRef.current = true;
+    epochRef.current += 1;
+    const epoch = epochRef.current;
+    let accepted = false;
+    setError(null);
+    setLive({ ...turn, scope: activeScope, phase: null, stage: null, card: null, phaseChange: null, reply: '' });
     try {
-      await streamIdeationMessage(
-        hackathonId,
-        { scope: activeScope, content },
-        (event) => {
-          if (event.event === 'delta') setPending((prev) => (prev ? { ...prev, reply: prev.reply + event.data.text } : prev));
-          if (event.event === 'error') setSendError(event.data.message);
-        },
-        controller.signal,
-      );
-      await load(true);
+      await start((event) => {
+        accepted = true;
+        if (event.event === 'error') {
+          setError(event.data.message);
+          if (event.data.retryAfter) setCooldownUntil(Date.now() + event.data.retryAfter * 1000);
+          return;
+        }
+        setLive((prev) => (prev ? applyStreamEvent(prev, event) : prev));
+      }, controller.signal);
     } catch (e) {
-      if (!controller.signal.aborted) {
-        setSendError(friendly(e));
-        setDraft(content);
-      }
+      if (controller.signal.aborted) return;
+      const wait = retryAfterSeconds(e);
+      if (wait) setCooldownUntil(Date.now() + wait * 1000);
+      setError(friendly(e));
+      if (!accepted) onRejected();
     } finally {
-      pendingRef.current = false;
-      setPending(null);
+      if (!controller.signal.aborted) {
+        if (accepted) {
+          try {
+            const next = await hmtBackendService.getIdeation(hackathonId);
+            if (epoch === epochRef.current) setState(next);
+          } catch {}
+        }
+        if (epoch === epochRef.current) setLive(null);
+      }
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+        streamingRef.current = false;
+      }
     }
   }
 
+  function send() {
+    const content = draft.trim();
+    if (!content || !hackathonId || cooldownSeconds > 0) return;
+    const sendScope = activeScope;
+    setDraft('');
+    runTurn(
+      { content, deck: null },
+      (onEvent, signal) => streamIdeationMessage(hackathonId, { scope: sendScope, content }, onEvent, signal),
+      () => setDraft(content),
+    );
+  }
+
+  function uploadDeck(fileName: string, slides: IdeationDeckSlide[]) {
+    if (!hackathonId || cooldownSeconds > 0) return;
+    const sendScope = activeScope;
+    runTurn(
+      { content: '', deck: { fileName, slideCount: slides.length } },
+      (onEvent, signal) => streamDeckReview(hackathonId, { scope: sendScope, fileName, slides }, onEvent, signal),
+      () => {},
+    );
+  }
+
+  function handleTabKey(e: KeyboardEvent<HTMLButtonElement>) {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'Home' && e.key !== 'End') return;
+    e.preventDefault();
+    const index = SCOPES.findIndex((s) => s.value === activeScope);
+    const next = e.key === 'Home' ? 0 : e.key === 'End' ? SCOPES.length - 1 : (index + (e.key === 'ArrowRight' ? 1 : -1) + SCOPES.length) % SCOPES.length;
+    setScope(SCOPES[next].value);
+    document.getElementById(`ai-helper-tab-${SCOPES[next].value}`)?.focus();
+  }
+
+  const title = state?.hackathon.title ?? ctx.selectedTitle;
   const header = (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">AI Helper{state?.hackathon.title ? ` · ${state.hackathon.title}` : ''}</div>
-        <h1 className="mt-2 text-3xl font-bold tracking-[-.05em] text-[#171a2d]">Incubate your idea, round by round.</h1>
-        <p className="mt-2 max-w-xl text-sm leading-6 text-[#77798a]">A coach that asks the hard questions instead of handing you answers. Your organizer opens each round; work through it with your team, or think privately first.</p>
-      </div>
+    <div>
+      <div className="font-mono text-[11px] uppercase tracking-[.18em] text-[#f26a4f]">AI Helper{title ? ` · ${title}` : ''}</div>
+      <h1 className="mt-2 text-2xl font-bold tracking-[-.05em] text-[#171a2d] sm:text-3xl">Sharpen your idea, phase by phase.</h1>
+      <p className="mt-2 max-w-2xl text-sm leading-6 text-[#77798a]">
+        A coach that asks hard, honest questions and challenges claims with real papers and real competitors. It never writes the idea for you. Move on when your answers hold up.
+      </p>
     </div>
   );
 
-  const picker = (
+  const needsPicker = ctx.loading || !hackathonId || ctx.options.length > 1 || !ctx.selectedIsRegistered;
+  const picker = needsPicker && (
     <div className="flex flex-col gap-2 rounded-2xl border border-[#dedbd1] bg-[#f4f1e8] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       {ctx.loading ? (
-        <span className="text-xs text-[#77798a]">Loading hackathon context…</span>
+        <span className="text-xs text-[#77798a]">Loading your event…</span>
       ) : !hackathonId ? (
-        <span className="text-xs text-[#55586a]">Register for a hackathon to unlock the AI Helper. <Link href="/participant/hackathons" className="font-bold underline">Discover hackathons</Link></span>
+        <span className="text-xs text-[#55586a]">Register for an event to unlock the AI Helper. <Link href="/participant/hackathons" className="font-bold underline">Discover hackathons</Link></span>
       ) : (
         <>
-          <label className="flex items-center gap-2 text-xs font-semibold text-[#55586a]">Hackathon
-            <select
-              value={hackathonId}
-              onChange={(e) => ctx.select(e.target.value || null)}
-              className="rounded-lg border border-[#dedbd1] bg-white px-2 py-1.5 text-xs font-bold text-[#171a2d] outline-none focus:border-[#f26a4f]"
-              aria-label="Select hackathon"
-            >
-              {ctx.options.map((o) => <option key={o.id} value={o.id}>{o.title}{o.registered ? '' : ' (not registered)'}</option>)}
-            </select>
-          </label>
+          {ctx.options.length > 1 && (
+            <label className="flex min-w-0 items-center gap-2 text-xs font-semibold text-[#55586a]">
+              Event
+              <select
+                value={hackathonId}
+                onChange={(e) => ctx.select(e.target.value || null)}
+                className="min-w-0 max-w-full rounded-lg border border-[#dedbd1] bg-white px-2 py-1.5 text-xs font-bold text-[#171a2d] outline-none focus:border-[#f26a4f]"
+              >
+                {ctx.options.map((o) => <option key={o.id} value={o.id}>{o.title}{o.registered ? '' : ' (not registered)'}</option>)}
+              </select>
+            </label>
+          )}
           {!ctx.selectedIsRegistered && (
-            <span className="text-xs text-[#55586a]">Not registered here — <Link href="/participant/hackathons" className="font-bold underline">register in Discover</Link> to use the AI Helper.</span>
+            <span className="text-xs text-[#55586a]">Not registered here. <Link href="/participant/hackathons" className="font-bold underline">Register in Discover</Link> to use the AI Helper.</span>
           )}
         </>
       )}
@@ -201,107 +236,90 @@ export default function ParticipantAIHelper() {
       body = <div className="space-y-4"><div className="h-24 animate-pulse rounded-2xl bg-[#e9e5da]" /><div className="h-80 animate-pulse rounded-2xl bg-[#e9e5da]" /></div>;
     } else if (loadError) {
       body = (
-        <div className="flex gap-3 rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-          <AlertCircle size={18} />
+        <div role="alert" className="flex gap-3 rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+          <AlertCircle size={18} className="shrink-0" aria-hidden />
           <div><b>AI Helper is not available</b><p className="mt-1">{loadError}</p><button onClick={() => load(false)} className="mt-3 text-xs font-bold underline">Try again</button></div>
         </div>
       );
     } else if (state) {
-      const teamLocked = activeScope === 'team' && !state.team;
+      const teamLocked = activeScope === 'team' && !state.teamThread;
+      const currentPhase = state.phases[phase - 1];
       body = (
         <div className="space-y-5">
-          <RoundStepper state={state} />
-          {!state.configured && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">AI Helper isn't configured yet — ask the organizer. You can still write down your thinking; messages are saved.</div>
-          )}
-          <div className="rounded-2xl border border-[#dedbd1] bg-[#fdfbf5]">
-            <div className="flex items-center gap-1 border-b border-[#e5e1d7] p-2" role="tablist">
-              {([['team', 'Team', Users], ['personal', 'Personal', User]] as const).map(([value, label, Icon]) => (
-                <button
-                  key={value}
-                  role="tab"
-                  aria-selected={activeScope === value}
-                  onClick={() => setScope(value)}
-                  className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold ${activeScope === value ? 'bg-[#171a2d] text-white' : 'text-[#55586a] hover:bg-[#f4f1e8]'}`}
-                >
-                  <Icon size={14} /> {label}
-                  {value === 'team' && state.team && <span className="font-normal opacity-70">· {state.team.name}</span>}
-                </button>
-              ))}
-              <span className="ml-auto hidden pr-2 text-[11px] text-[#77798a] sm:inline">
-                {activeScope === 'team' ? (state.team ? `Shared with ${state.team.members.map((m) => m.name).join(', ')}` : '') : 'Only you can see this thread'}
+          <PhaseProgress phases={state.phases} current={phase} />
+          <div className="overflow-hidden rounded-2xl border border-[#dedbd1] bg-[#fdfbf5]">
+            <div className="flex flex-wrap items-center gap-1 border-b border-[#e5e1d7] p-2">
+              <div role="tablist" aria-label="Conversation" className="flex gap-1">
+                {SCOPES.map(({ value, label, Icon }) => (
+                  <button
+                    key={value}
+                    id={`ai-helper-tab-${value}`}
+                    role="tab"
+                    type="button"
+                    aria-selected={activeScope === value}
+                    aria-controls="ai-helper-panel"
+                    tabIndex={activeScope === value ? 0 : -1}
+                    onClick={() => setScope(value)}
+                    onKeyDown={handleTabKey}
+                    className={cn('inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold', activeScope === value ? 'bg-[#171a2d] text-white' : 'text-[#55586a] hover:bg-[#f4f1e8]')}
+                  >
+                    <Icon size={14} aria-hidden /> {label}
+                  </button>
+                ))}
+              </div>
+              <span className="ml-auto truncate px-2 text-[11px] text-[#77798a]">
+                {activeScope === 'team' ? (state.team ? `${state.team.name} · shared with your team` : '') : 'Only you can see this thread'}
               </span>
             </div>
-            {teamLocked ? (
-              <div className="p-8 text-center">
-                <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-[#171a2d] text-[#d8e35b]"><Users size={22} /></div>
-                <h2 className="mt-4 text-lg font-bold">Join a team first</h2>
-                <p className="mt-2 text-sm leading-6 text-[#77798a]">The team thread is shared by everyone on your team. Create or join one, or use your personal thread meanwhile.</p>
-                <div className="mt-5 flex justify-center gap-2">
-                  <Link href="/participant/teams" className="rounded-xl bg-[#f26a4f] px-4 py-2 text-xs font-bold text-white">Go to My Team</Link>
-                  <button onClick={() => setScope('personal')} className="rounded-xl border border-[#dedbd1] px-4 py-2 text-xs font-bold">Use personal thread</button>
+            <div id="ai-helper-panel" role="tabpanel" aria-labelledby={`ai-helper-tab-${activeScope}`}>
+              {teamLocked ? (
+                <div className="p-8 text-center">
+                  <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-[#171a2d] text-[#d8e35b]"><Users size={22} aria-hidden /></div>
+                  <h2 className="mt-4 text-lg font-bold">Join a team first</h2>
+                  <p className="mt-2 text-sm leading-6 text-[#77798a]">The team thread is shared by everyone on your team. Create or join one, or think privately in your personal thread meanwhile.</p>
+                  <div className="mt-5 flex flex-wrap justify-center gap-2">
+                    <Link href="/participant/teams" className="rounded-xl bg-[#f26a4f] px-4 py-2 text-xs font-bold text-white">Go to My Team</Link>
+                    <button type="button" onClick={() => setScope('personal')} className="rounded-xl border border-[#dedbd1] px-4 py-2 text-xs font-bold">Use personal thread</button>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <>
-                <div ref={listRef} className="h-[52vh] min-h-[320px] space-y-3 overflow-y-auto p-4" aria-live="polite">
-                  {thread.length === 0 && !pendingHere && (
-                    <div className="mx-auto mt-10 max-w-md text-center text-sm leading-6 text-[#77798a]">
-                      <Sparkles size={20} className="mx-auto mb-2 text-[#f26a4f]" />
-                      Start with what you have, even if it is rough. For round {state.currentRound}, tell the AI Helper what you are thinking about {state.ideation.rounds[state.currentRound - 1]?.title.toLowerCase()}.
+              ) : (
+                <>
+                  <ChatThread
+                    messages={thread?.messages ?? []}
+                    phases={state.phases}
+                    live={liveHere}
+                    currentUserId={user?.id ?? null}
+                    currentUserName={userName}
+                    resetKey={`${hackathonId}:${activeScope}`}
+                    emptyState={
+                      <div className="mx-auto mt-10 max-w-md text-center text-sm leading-6 text-[#77798a]">
+                        <Sparkles size={20} className="mx-auto mb-2 text-[#f26a4f]" aria-hidden />
+                        Start with what you have, even if it is rough.
+                        {currentPhase?.questions?.[0] && <span className="mt-2 block font-semibold text-[#171a2d]">“{currentPhase.questions[0]}”</span>}
+                      </div>
+                    }
+                  />
+                  {error && (
+                    <div role="alert" className="mx-3 mb-1 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                      <AlertCircle size={14} className="mt-0.5 shrink-0" aria-hidden />
+                      <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{error}</span>
+                      <button type="button" onClick={() => setError(null)} className="shrink-0" aria-label="Dismiss error"><X size={13} aria-hidden /></button>
                     </div>
                   )}
-                  {thread.map((m) => (
-                    <MessageBubble key={m.id} message={m} mine={m.role === 'user' && (!!user?.id && m.authorId === user.id)} showAuthor={activeScope === 'team'} />
-                  ))}
-                  {pendingHere && (
-                    <>
-                      <MessageBubble message={{ role: 'user', content: pendingHere.content, round: state.currentRound, authorName: null }} mine showAuthor={false} />
-                      <div className="flex justify-start">
-                        <div className="max-w-[85%] rounded-2xl border border-[#e5e1d7] bg-white px-4 py-3 text-sm leading-6 text-[#171a2d]">
-                          <div className="mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-[#f26a4f]"><Sparkles size={11} /> AI Helper</div>
-                          {pendingHere.reply ? <div className="whitespace-pre-wrap break-words">{pendingHere.reply}</div> : <span className="inline-flex items-center gap-2 text-xs text-[#77798a]"><Loader2 size={13} className="animate-spin" /> Thinking…</span>}
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-                {sendError && (
-                  <div className="mx-4 mb-2 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-                    <AlertCircle size={14} className="mt-0.5" />{sendError}
-                    <button onClick={() => setSendError(null)} className="ml-auto" aria-label="Dismiss"><X size={13} /></button>
-                  </div>
-                )}
-                <form
-                  className="flex items-end gap-2 border-t border-[#e5e1d7] p-3"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    send();
-                  }}
-                >
-                  <div className="flex-1">
-                    <textarea
-                      value={draft}
-                      onChange={(e) => setDraft(e.target.value.slice(0, MAX_LENGTH))}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          send();
-                        }
-                      }}
-                      rows={3}
-                      placeholder={activeScope === 'team' ? 'Share with your team and the AI Helper… (Shift+Enter for a new line)' : 'Think out loud privately… (Shift+Enter for a new line)'}
-                      className="w-full resize-none rounded-xl border border-[#dedbd1] bg-white px-3 py-2 text-sm outline-none focus:border-[#f26a4f]"
-                      aria-label="Message the AI Helper"
-                    />
-                    <div className="mt-1 text-right font-mono text-[10px] text-[#9b9fb1]">{draft.length}/{MAX_LENGTH}</div>
-                  </div>
-                  <button type="submit" disabled={!draft.trim() || !!pending} className="mb-5 inline-flex items-center gap-2 rounded-xl bg-[#f26a4f] px-4 py-3 text-xs font-bold text-white disabled:opacity-40">
-                    {pending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Send
-                  </button>
-                </form>
-              </>
-            )}
+                  <Composer
+                    value={draft}
+                    onChange={setDraft}
+                    onSubmit={send}
+                    maxChars={maxChars}
+                    streaming={streaming}
+                    cooldownSeconds={cooldownSeconds}
+                    placeholder={activeScope === 'team' ? 'Share with your team and the coach…' : 'Think out loud privately…'}
+                  >
+                    {phase === DECK_PHASE && <DeckUpload disabled={streaming || cooldownSeconds > 0} onDeck={uploadDeck} onError={setError} />}
+                  </Composer>
+                </>
+              )}
+            </div>
           </div>
         </div>
       );
@@ -309,7 +327,7 @@ export default function ParticipantAIHelper() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       {header}
       {picker}
       {body}

@@ -112,5 +112,5 @@ export const organizerApi = {
   async tryDeleteAuditLog(id: string): Promise<any> { return fetchOrganizer(`/audit/logs/${id}`, { method: 'DELETE' }); },
 };
 
-export type OrganizerIdeationRound = { title: string; goal: string; questions: string[]; exitCriteria: string };
-export type OrganizerIdeationConfig = { currentRound: number; rounds: OrganizerIdeationRound[]; extraInstructions?: string };
+export type OrganizerIdeationPhase = { id: number; title: string; goal: string; questions: string[]; exitCheck: string };
+export type OrganizerIdeationConfig = { phases: OrganizerIdeationPhase[]; extraInstructions?: string };

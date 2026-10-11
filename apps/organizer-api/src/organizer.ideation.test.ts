@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
-import { DEFAULT_IDEATION_ROUNDS, defaultIdeationConfig } from '@hmt/contracts';
+import { DEFAULT_PHASES, defaultIdeationConfig } from '@hmt/contracts';
 import { buildApp } from './main';
 import { memoryStore } from './store/memory.store';
 
-describe('Organizer ideation rounds', () => {
+describe('Organizer ideation phases', () => {
   let app: any;
   let orgToken = '';
   let otherOrgToken = '';
@@ -55,13 +55,12 @@ describe('Organizer ideation rounds', () => {
     vi.restoreAllMocks();
   });
 
-  const validConfig = () => ({
+  const validConfig = (extraInstructions = 'Focus on campus problems.') => ({
     ...defaultIdeationConfig(),
-    currentRound: 2,
-    extraInstructions: 'Focus on campus problems.',
+    extraInstructions,
   });
 
-  it('returns the five default rounds with round 1 active', async () => {
+  it('returns the six default phases', async () => {
     const res = await app.inject({
       method: 'GET',
       url: `/api/v1/hackathons/${hackathonId}/ideation`,
@@ -69,11 +68,11 @@ describe('Organizer ideation rounds', () => {
     });
     expect(res.statusCode).toBe(200);
     const data = JSON.parse(res.body).data;
-    expect(data.currentRound).toBe(1);
-    expect(data.rounds).toHaveLength(5);
-    expect(data.rounds.map((r: any) => r.title)).toEqual(
-      DEFAULT_IDEATION_ROUNDS.map((r) => r.title),
-    );
+    expect(data.currentRound).toBeUndefined();
+    expect(data.phases).toHaveLength(6);
+    expect(data.phases.map((p: any) => p.id)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(data.phases.map((p: any) => p.title)).toEqual(DEFAULT_PHASES.map((p) => p.title));
+    expect(data.phases[5].goal).toMatch(/60-second/);
   });
 
   it('rejects non-owners', async () => {
@@ -86,22 +85,26 @@ describe('Organizer ideation rounds', () => {
   });
 
   it('validates the config shape', async () => {
-    const badRound = await app.inject({
-      method: 'PUT',
-      url: `/api/v1/hackathons/${hackathonId}/ideation`,
-      headers: auth(orgToken),
-      payload: { ...validConfig(), currentRound: 6 },
-    });
-    expect(badRound.statusCode).toBe(400);
-    const fourRounds = await app.inject({
-      method: 'PUT',
-      url: `/api/v1/hackathons/${hackathonId}/ideation`,
-      headers: auth(orgToken),
-      payload: { ...validConfig(), rounds: validConfig().rounds.slice(0, 4) },
-    });
-    expect(fourRounds.statusCode).toBe(400);
+    const put = (payload: unknown) =>
+      app.inject({
+        method: 'PUT',
+        url: `/api/v1/hackathons/${hackathonId}/ideation`,
+        headers: auth(orgToken),
+        payload,
+      });
+    expect((await put({ ...validConfig(), currentRound: 2 })).statusCode).toBe(400);
+    expect(
+      (await put({ ...validConfig(), phases: validConfig().phases.slice(0, 5) })).statusCode,
+    ).toBe(400);
+    const swapped = validConfig().phases;
+    [swapped[0], swapped[1]] = [swapped[1], swapped[0]];
+    expect((await put({ ...validConfig(), phases: swapped })).statusCode).toBe(400);
+    const longCheck = validConfig();
+    longCheck.phases[2] = { ...longCheck.phases[2], exitCheck: 'x'.repeat(1501) };
+    expect((await put(longCheck)).statusCode).toBe(400);
+    expect((await put(validConfig('x'.repeat(4001)))).statusCode).toBe(400);
     const emptyQuestions = validConfig();
-    emptyQuestions.rounds[0] = { ...emptyQuestions.rounds[0], questions: [] };
+    emptyQuestions.phases[0] = { ...emptyQuestions.phases[0], questions: [] };
     const noQuestions = await app.inject({
       method: 'PUT',
       url: `/api/v1/hackathons/${hackathonId}/ideation`,
@@ -126,7 +129,7 @@ describe('Organizer ideation rounds', () => {
       url: `/api/v1/hackathons/${hackathonId}/ideation`,
       headers: auth(orgToken),
     });
-    expect(JSON.parse(read.body).data.currentRound).toBe(2);
+    expect(JSON.parse(read.body).data.extraInstructions).toBe('Focus on campus problems.');
     expect(
       Array.from(memoryStore.auditLogs.values()).some(
         (log) => log.action === 'hackathon.ideation_updated' && log.resourceId === hackathonId,
@@ -142,46 +145,46 @@ describe('Organizer ideation rounds', () => {
       method: 'PUT',
       url: `/api/v1/hackathons/${hackathonId}/ideation`,
       headers: auth(orgToken),
-      payload: { ...validConfig(), currentRound: 3 },
+      payload: validConfig('Push me'),
     });
     expect(delivered.statusCode).toBe(200);
     const [url, init] = ok.mock.calls[0] as [string, RequestInit];
     expect(url).toMatch(new RegExp(`/sync/ideation/${hackathonId}$`));
     expect(init.method).toBe('PUT');
-    expect(JSON.parse(String(init.body)).currentRound).toBe(3);
+    expect(JSON.parse(String(init.body)).extraInstructions).toBe('Push me');
     ok.mockResolvedValue(new Response('{}', { status: 500 }));
     const failed = await app.inject({
       method: 'PUT',
       url: `/api/v1/hackathons/${hackathonId}/ideation`,
       headers: auth(orgToken),
-      payload: { ...validConfig(), currentRound: 4 },
+      payload: validConfig('Fail me'),
     });
     expect(failed.statusCode).toBe(502);
     expect(JSON.parse(failed.body).error.code).toBe('SYNC_FAILED');
   });
 
-  it('delivers rapid round changes in order so the participant app ends on the latest round', async () => {
+  it('delivers rapid config changes in order so the participant app ends on the latest config', async () => {
     const stored = memoryStore.hackathons.get(hackathonId)!;
     memoryStore.hackathons.set(hackathonId, { ...stored, status: 'PUBLISHED' });
-    const delivered: number[] = [];
+    const delivered: string[] = [];
     let call = 0;
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
-      const round = JSON.parse(String((init as RequestInit).body)).currentRound;
+      const round = JSON.parse(String((init as RequestInit).body)).extraInstructions;
       await new Promise((resolve) => setTimeout(resolve, call++ === 0 ? 40 : 0));
       delivered.push(round);
       return new Response('{}', { status: 200 });
     });
-    const put = (round: number) =>
+    const put = (round: string) =>
       app.inject({
         method: 'PUT',
         url: `/api/v1/hackathons/${hackathonId}/ideation`,
         headers: auth(orgToken),
-        payload: { ...validConfig(), currentRound: round },
+        payload: validConfig(round),
       });
-    const [first, second] = await Promise.all([put(3), put(4)]);
+    const [first, second] = await Promise.all([put('first'), put('second')]);
     expect(first.statusCode).toBe(200);
     expect(second.statusCode).toBe(200);
-    expect(delivered[delivered.length - 1]).toBe(4);
-    expect(memoryStore.hackathons.get(hackathonId)!.ideation!.currentRound).toBe(4);
+    expect(delivered[delivered.length - 1]).toBe('second');
+    expect(memoryStore.hackathons.get(hackathonId)!.ideation!.extraInstructions).toBe('second');
   });
 });

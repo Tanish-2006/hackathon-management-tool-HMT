@@ -880,7 +880,6 @@ export class HackathonService {
   async updateIdeation(id: string, userId: string, ideation: IdeationConfig, opts?: { ip?: string; requestId?: string }): Promise<IdeationConfig> {
     const hackathon = this.requireOwnedHackathon(id, userId);
     if (hackathon.status === 'ARCHIVED') throw Object.assign(new Error('Archived hackathons are read-only'), { statusCode: 400 });
-    const previousRound = hackathon.ideation?.currentRound ?? 1;
     memoryStore.hackathons.set(id, { ...hackathon, ideation, updatedAt: new Date().toISOString() });
     await auditService.log({
       actorId: userId,
@@ -891,7 +890,7 @@ export class HackathonService {
       outcome: 'success',
       ip: opts?.ip ?? null,
       requestId: opts?.requestId ?? null,
-      metadata: { fromRound: previousRound, toRound: ideation.currentRound },
+      metadata: { phases: ideation.phases.map((phase) => phase.title) },
     });
     if (hackathon.status === 'PUBLISHED' && !(await this.pushIdeation(id))) {
       throw Object.assign(new Error('Saved, but the participant app did not receive the update. Retry to sync.'), { statusCode: 502 });

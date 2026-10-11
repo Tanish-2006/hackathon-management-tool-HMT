@@ -1,94 +1,116 @@
 import { z } from 'zod';
 
-export const IDEATION_ROUND_COUNT = 5;
+export const IDEATION_PHASE_COUNT = 6;
 
-export const ideationRoundSchema = z.object({
+export const ideationPhaseSchema = z.object({
+  id: z.number().int().min(1).max(IDEATION_PHASE_COUNT),
   title: z.string().trim().min(1).max(120),
   goal: z.string().trim().min(1).max(1500),
   questions: z.array(z.string().trim().min(1).max(500)).min(1).max(12),
-  exitCriteria: z.string().trim().min(1).max(1500),
+  exitCheck: z.string().trim().min(1).max(1500),
 });
 
-export const ideationConfigSchema = z.object({
-  currentRound: z.number().int().min(1).max(IDEATION_ROUND_COUNT),
-  rounds: z.array(ideationRoundSchema).length(IDEATION_ROUND_COUNT),
-  extraInstructions: z.string().max(4000).optional(),
-});
+export const ideationConfigSchema = z
+  .object({
+    phases: z.array(ideationPhaseSchema).length(IDEATION_PHASE_COUNT),
+    extraInstructions: z.string().max(4000).optional(),
+  })
+  .strict()
+  .refine((config) => config.phases.every((phase, index) => phase.id === index + 1), {
+    message: 'phases must be ordered with ids 1 to 6',
+    path: ['phases'],
+  });
 
-export type IdeationRound = z.infer<typeof ideationRoundSchema>;
+export type IdeationPhase = z.infer<typeof ideationPhaseSchema>;
 export type IdeationConfig = z.infer<typeof ideationConfigSchema>;
 
-export const DEFAULT_IDEATION_ROUNDS: readonly IdeationRound[] = [
+export const DEFAULT_PHASES: readonly IdeationPhase[] = [
   {
-    title: 'Problem Discovery',
-    goal: 'Pin down one specific, painful, real problem worth solving, described in the words of the people who have it, before any solution is discussed.',
+    id: 1,
+    title: 'Problem',
+    goal: 'Pin down one specific, painful, real problem, described in the words of the people who actually have it, before any solution is discussed.',
     questions: [
-      'What exact problem are you choosing, in one sentence, with no solution words in it?',
-      'Who has this problem, and when did you last see it happen?',
-      'How often does it happen and what does it cost them in time, money, risk or frustration?',
-      'How do people cope with it today, and why is that not good enough?',
-      'Why does this problem matter to your team in particular?',
+      'What is the problem in one sentence, with no solution words in it?',
+      'Who exactly has this problem, and when did you last see it happen?',
+      'How often does it happen, and what does it cost them in time, money, risk or frustration?',
+      'What words do the people who have it use to describe it?',
+      'Why is this problem worth solving now, and why by your team?',
     ],
-    exitCriteria:
-      'The team can state one narrow problem statement without mentioning a solution, names who suffers from it, gives at least one concrete example or data point showing it is real and frequent, and explains why current workarounds fall short.',
+    exitCheck:
+      'The team states one narrow problem without mentioning a solution, names who suffers from it, and gives at least one concrete example or data point showing it is real, frequent and costly.',
   },
   {
-    title: 'Users & Validation',
-    goal: 'Define the primary user precisely and gather evidence that they genuinely feel this problem, instead of relying on assumptions.',
+    id: 2,
+    title: 'Users',
+    goal: 'Define exactly who the primary user is, what they do today to cope, and how the team actually knows this rather than assuming it.',
     questions: [
       'Who is your primary user? Describe one specific person: role, context, constraints.',
-      'Who pays or decides, and is that the same person who feels the pain?',
-      'What evidence do you have that they care: conversations, surveys, reviews, forum posts, statistics?',
-      'Which assumption about your users is riskiest, and how could you test it within the next few hours?',
-      'What did you learn that surprised you or changed your view of the problem?',
+      'What do they do today to deal with the problem, step by step?',
+      'Why is their current workaround not good enough for them?',
+      'How do you know: who did you talk to, what did you observe, what data did you find?',
+      'Is the person who feels the pain the same person who would pay or decide?',
     ],
-    exitCriteria:
-      'The team has a sharp primary user persona, has separated user from buyer where relevant, has cited at least two pieces of real evidence (ideally direct conversations), and has named its riskiest remaining assumption with a quick way to test it.',
+    exitCheck:
+      'The team names a sharp primary user, describes their current workaround concretely, and backs it with real evidence such as conversations, observations or data rather than guesses.',
   },
   {
-    title: 'Solution & Differentiation',
-    goal: 'Shape a focused solution concept that directly answers the validated problem and is clearly different from what already exists.',
+    id: 3,
+    title: 'Prior work',
+    goal: 'Find out what research, products and workarounds already exist for this problem, and learn honestly from what has been tried.',
     questions: [
-      'What is the core idea in one sentence, and which part of the problem does it remove?',
-      'What is the single most important thing a user does with it, step by step?',
-      'Which existing products, services or workarounds compete with it, and where do they fail this user?',
-      'What is your unfair advantage or unique insight that others are missing?',
+      'Which existing products, services or tools already try to solve this?',
+      'What research or published work exists on this problem?',
+      'Why have earlier attempts failed, stalled or stayed niche?',
+      'What do users like and dislike about the best existing option?',
+      'What did you find that surprised you or challenged your assumptions?',
+    ],
+    exitCheck:
+      'The team names at least two existing solutions or studies with sources, explains what each does well and where it falls short for their user, and has updated its view where the evidence demanded it.',
+  },
+  {
+    id: 4,
+    title: 'Gap & solution',
+    goal: 'Identify what is genuinely missing from existing solutions and explain why the team’s idea fills that gap better for their user.',
+    questions: [
+      'What exactly is missing from the existing solutions you found?',
+      'What is your idea in one sentence, and which part of the problem does it remove?',
+      'Why would your user switch from what they use today?',
+      'What insight or advantage do you have that others missed?',
       'What will you deliberately leave out of the first version?',
     ],
-    exitCriteria:
-      'The team can explain the solution in one sentence, walk through the core user flow, name at least two alternatives and why they fall short, state a credible differentiator, and list what is explicitly out of scope.',
+    exitCheck:
+      'The team names a specific gap tied to their prior-work findings, explains their solution in one sentence, and gives a credible reason why their user would switch, without overclaiming.',
   },
   {
-    title: 'Feasibility & Business Model',
-    goal: 'Stress-test whether the idea can actually be built and sustained: technology, resources, risks, and how it creates and captures value.',
+    id: 5,
+    title: 'Feasibility',
+    goal: 'Stress-test whether the team can actually build and validate the idea, and surface the riskiest assumption before judges do.',
     questions: [
-      'What is the smallest prototype that proves the core value, and can your team build it with the skills and time you have?',
-      'What technology, data, partners or permissions does it depend on, and which are uncertain?',
-      'Who pays, how much, and why would they pay rather than keep their workaround?',
-      'What are the main costs to build and run it, and how does it reach its first 100 users?',
-      'What are the top three risks (technical, legal, ethical, market) and how would you reduce each?',
+      'What is the smallest prototype or test that proves the core value?',
+      'Can your team build it with the skills, data and time you actually have?',
+      'What technology, data, partners or permissions does it depend on?',
+      'What is your riskiest assumption, and how would you test it cheaply?',
+      'What legal, ethical or safety issues could block it?',
     ],
-    exitCriteria:
-      'The team has a realistic minimum prototype matched to its skills, identified key dependencies, a plausible revenue or sustainability model with a named payer, a first go-to-market channel, and the top risks with mitigations.',
+    exitCheck:
+      'The team describes a realistic minimum prototype matched to its skills, names its dependencies, states its riskiest assumption, and has a cheap, concrete way to test it.',
   },
   {
-    title: 'Pitch & Final Refinement',
-    goal: 'Turn the work of the previous rounds into a clear, honest, evidence-backed pitch and close any remaining gaps.',
+    id: 6,
+    title: 'Pitch & deck',
+    goal: 'Turn phases 1 to 5 into a clear, honest 60-second pitch, prepare judge-proof answers, outline the slides, and review the uploaded deck against everything established so far.',
     questions: [
-      'Can you tell the story in under two minutes: problem, user, evidence, solution, differentiation, model, ask?',
-      'Which claim in your pitch is weakest, and what evidence or demo moment would make it convincing?',
-      'What will judges most likely challenge, and how will you answer?',
-      'What is the single memorable line or moment you want the audience to remember?',
-      'What would you build or test next if you had one more month?',
+      'Can you explain the problem, user, evidence, gap and solution in 60 seconds?',
+      'Which claim in your pitch is weakest, and what evidence backs it?',
+      'What are the three hardest questions judges will ask, and what are your answers?',
+      'What is your slide outline, and does every slide earn its place?',
+      'Does your deck match what you established in phases 1 to 5, with no overclaims?',
     ],
-    exitCriteria:
-      'The team has a tight pitch narrative that connects every earlier round, backs key claims with evidence, has prepared answers to likely judge questions, and states a clear next step.',
+    exitCheck:
+      'The team delivers a 60-second pitch consistent with phases 1 to 5, has honest answers to likely judge questions, has a slide outline with one clear message per slide, and has addressed the deck review findings.',
   },
 ];
 
 export function defaultIdeationConfig(): IdeationConfig {
-  return {
-    currentRound: 1,
-    rounds: DEFAULT_IDEATION_ROUNDS.map((round) => ({ ...round, questions: [...round.questions] })),
-  };
+  return { phases: DEFAULT_PHASES.map((phase) => ({ ...phase, questions: [...phase.questions] })) };
 }

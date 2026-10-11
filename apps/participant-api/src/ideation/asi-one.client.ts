@@ -61,23 +61,38 @@ export class AsiOneClient {
     try {
       const timeout = AbortSignal.timeout(this.timeoutMs);
       const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
-      const response = await this.open(messages, combined);
+      const response = await this.open(messages, combined, true);
       yield* this.readDeltas(response.body!);
     } finally {
       this.release();
     }
   }
 
-  private async open(messages: ChatMessage[], signal: AbortSignal): Promise<Response> {
+  async complete(messages: ChatMessage[], signal?: AbortSignal): Promise<string> {
+    if (!this.configured) return '';
+    await this.acquire(signal);
+    try {
+      const timeout = AbortSignal.timeout(this.timeoutMs);
+      const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+      const response = await this.open(messages, combined, false);
+      const body: any = await response.json();
+      const content = body?.choices?.[0]?.message?.content;
+      return typeof content === 'string' ? content : '';
+    } finally {
+      this.release();
+    }
+  }
+
+  private async open(messages: ChatMessage[], signal: AbortSignal, stream: boolean): Promise<Response> {
     for (let attempt = 0; ; attempt++) {
       const response = await fetch(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Accept: 'text/event-stream',
+          Accept: stream ? 'text/event-stream' : 'application/json',
           Authorization: `Bearer ${this.apiKey}`,
         },
-        body: JSON.stringify({ model: this.model, messages, stream: true, temperature: 0.6 }),
+        body: JSON.stringify({ model: this.model, messages, stream, temperature: stream ? 0.6 : 0 }),
         signal,
       });
       if (response.ok && response.body) return response;
